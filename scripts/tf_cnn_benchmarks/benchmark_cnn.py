@@ -37,9 +37,8 @@ import numpy as np
 
 import six
 from six.moves import xrange  # pylint: disable=redefined-builtin
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 
-# pylint: disable=g-direct-tensorflow-import
 import cnn_util
 import constants
 import datasets
@@ -61,6 +60,13 @@ from tensorflow.python.ops import data_flow_ops
 from tensorflow.python.platform import gfile
 from tensorflow.python.util import nest
 
+from tensorflow.contrib.compiler import xla
+import time
+import random
+import pdb
+import wandb as wb
+
+os.environ['TF_CPP_MIN_VLOG_LEVEL'] = '1'
 
 _DEFAULT_NUM_BATCHES = 100
 
@@ -112,6 +118,12 @@ InputProcessingInfo = namedtuple(
 flags.DEFINE_string('model', 'trivial',
                     'Name of the model to run, the list of supported models '
                     'are defined in models/model.py')
+
+flags.DEFINE_string('model2', 'trivial', 
+                    'Name of the second model to run in colocation mode,'
+                    'the list of supported models '
+                    'are defined in models/model.py')
+
 # The code will first check if it's running under benchmarking mode
 # or evaluation mode, depending on 'eval':
 # Under the evaluation mode, this script will read a saved model,
@@ -156,6 +168,15 @@ flags.DEFINE_boolean('print_training_accuracy', False,
                      'whether to calculate and print training accuracy during '
                      'training')
 flags.DEFINE_integer('batch_size', 0, 'batch size per compute device')
+# Add-on flags for supporting the colocation mode
+flags.DEFINE_integer('batch_size2', 0, '[ZICO FLAG] batch size per compute device for colocation mode')
+flags.DEFINE_integer('gpu_id', 0, '[ZICO FLAG] gpu_id for model')
+flags.DEFINE_integer('gpu_id2', 0, '[ZICO FLAG] gpu_id for model2')
+flags.DEFINE_string('run_mode', "Solo",
+                      'gangmuk: 0 is first model only.\
+                        1 is second model only. \
+                        2 is first and second model using threding _modified_benchmark_train')
+
 flags.DEFINE_integer('eval_batch_size', 0, 'eval batch size per compute device')
 flags.DEFINE_integer('batch_group_size', 1,
                      'number of groups of batches processed in the image '
@@ -200,9 +221,20 @@ flags.DEFINE_string('data_dir', None,
                     'Path to dataset in TFRecord format (aka Example '
                     'protobufs). If not specified, synthetic data will be '
                     'used.')
+# Add-on flags for supporting the colocation mode
+flags.DEFINE_string('data_dir2', None,
+                    'Path to dataset in TFRecord format (aka Example '
+                    'protobufs). If not specified, synthetic data will be '
+                    'used.')
+
 flags.DEFINE_string('data_name', None,
                     'Name of dataset: imagenet or cifar10. If not specified, '
                     'it is automatically guessed based on data_dir.')
+# Add-on flags for supporting the colocation mode
+flags.DEFINE_string('data_name2', None,
+                    'Name of dataset: imagenet or cifar10. If not specified, '
+                    'it is automatically guessed based on data_dir.')
+
 flags.DEFINE_string('resize_method', 'bilinear',
                     'Method for resizing input images: crop, nearest, '
                     'bilinear, bicubic, area, or round_robin. The `crop` mode '
@@ -212,7 +244,7 @@ flags.DEFINE_string('resize_method', 'bilinear',
                     'a round-robin fashion. Other modes support any sizes and '
                     'apply random bbox distortions before resizing (even with '
                     'distortions=False).')
-flags.DEFINE_boolean('distortions', False,
+flags.DEFINE_boolean('distortions', True,
                      'Enable/disable distortions during image preprocessing. '
                      'These include bbox and color distortions.')
 flags.DEFINE_boolean('use_datasets', True,
@@ -364,22 +396,23 @@ flags.DEFINE_float('gpu_memory_frac_for_testing', 0,
 flags.DEFINE_boolean('use_unified_memory', None,
                      'If True, allocate unified memory enabling larger models '
                      'to fit in available device RAM.')
-flags.DEFINE_boolean('timestamped_allocator', False,
-                     'If True marks free BFCAllocator::Chunks with time '
-                     'at which they are freed which can allow more efficient '
-                     'memory allocation in cases like RDMA networking.')
-flags.DEFINE_integer('gpu_kt_max_interval', 0,
-                     'If > 0, the maximum number of GPU Ops that may be queued '
-                     'in a row without also queuing a tracking event.')
-flags.DEFINE_integer('gpu_kt_max_bytes', 0,
-                     'If > 0, the maximum number of bytes '
-                     'of GPU memory that may be allocated by sequential '
-                     'GPU Ops without queuing a tracking event.')
-flags.DEFINE_integer('gpu_kt_max_pending', 0,
-                     'If > 0 no more than this many GPU tracking events may be '
-                     'outstanding at any time.  When this limit is reached '
-                     'launch of additional kernels will stall until an '
-                     'outstanding event completes.')
+# Why ZICO removing this parts? (21.11.15)
+# flags.DEFINE_boolean('timestamped_allocator', False,
+#                      'If True marks free BFCAllocator::Chunks with time '
+#                      'at which they are freed which can allow more efficient '
+#                      'memory allocation in cases like RDMA networking.')
+# flags.DEFINE_integer('gpu_kt_max_interval', 0,
+#                      'If > 0, the maximum number of GPU Ops that may be queued '
+#                      'in a row without also queuing a tracking event.')
+# flags.DEFINE_integer('gpu_kt_max_bytes', 0,
+#                      'If > 0, the maximum number of bytes '
+#                      'of GPU memory that may be allocated by sequential '
+#                      'GPU Ops without queuing a tracking event.')
+# flags.DEFINE_integer('gpu_kt_max_pending', 0,
+#                      'If > 0 no more than this many GPU tracking events may be '
+#                      'outstanding at any time.  When this limit is reached '
+#                      'launch of additional kernels will stall until an '
+#                      'outstanding event completes.')
 flags.DEFINE_boolean('use_tf_layers', True,
                      'If True, use tf.layers for neural network layers. This '
                      'should not affect performance or accuracy in any way.')
@@ -673,6 +706,79 @@ flags.DEFINE_string('benchmark_test_id', None,
                     'consumption, and does not have any impact within the '
                     'system.')
 
+# Gangmuk: New Param 0	
+flags.DEFINE_boolean('run_two_model', False, '[ZICO FLAG] run_two_model')	
+# Gangmuk: New Param 1	
+# flags.DEFINE_boolean('use_virtual_devices', False,	
+#                      '[ZICO FLAG] If Ture, set up two virtual devices for one GPU physical '	
+#                      'device. memory_limit_mb can be set through '	
+#                      '\'vGPU#_memory_limit\'. Default is None.')	
+# # Gangmuk: New Param 2	
+# flags.DEFINE_integer('vGPU1_memory_limit', 0,	
+#                      '[ZICO FLAG] Memory limit for virtual GPU 1. \'use_virtual_devices\' '	
+#                      'must be set up to use it.,')	
+# # Gangmuk: New Param 3	
+# flags.DEFINE_integer('vGPU2_memory_limit', 0,	
+#                      '[ZICO FLAG] Memory limit for virtual GPU 2. \'use_virtual_devices\' '	
+#                      'must be set up to use it.')	
+# Gangmuk: New Param 4	
+flags.DEFINE_boolean('recording_tensors', False,	
+                     '[ZICO FLAG] Set BaseGPUDevice::RequiresRecordingAccessedTensors return value.')	
+# Gangmuk: New Param 5	
+flags.DEFINE_boolean('tensor_recording_original_version', True,	
+                     '[ZICO FLAG] Set EventMgr::tensor_recording_original_version variable.')	
+# Gangmuk: New Param 6	
+flags.DEFINE_boolean('print_raw_internal_csv', False,	
+                     '[ZICO FLAG] ')	
+# Gangmuk: New Param 7	
+flags.DEFINE_boolean('adaptive_alloc', False,	
+                     '[ZICO FLAG] ')	
+# Gangmuk: New Param 8	
+flags.DEFINE_boolean('activate_global_pool', False,	
+                     '[ZICO FLAG] ')	
+# Gangmuk: New Param 9	
+flags.DEFINE_boolean('global_pool_release_ar', False,	
+                     '[ZICO FLAG] ')	
+                     	
+# Gangmuk: New Param 10	
+flags.DEFINE_boolean('global_pool_release_all', False,	
+                     '[ZICO FLAG] ')	
+# Gangmuk: New Param 11	
+flags.DEFINE_boolean('gpu_release_ar', False,	
+                     '[ZICO FLAG] ')	
+# Gangmuk: New Param 12	
+flags.DEFINE_boolean('gpu_release_all', False,	
+                     '[ZICO FLAG] ')	
+# Gangmuk: New Param 13	
+flags.DEFINE_boolean('tighten_ar_size', False,	
+                     '[ZICO FLAG] ')	
+# Gangmuk: New Param 14	
+flags.DEFINE_boolean('skip_all_test', False,	
+                     '[ZICO FLAG] ')	
+# Gangmuk: New Param 15	
+flags.DEFINE_boolean('skip_ref_count_is_one', False,	
+                     '[ZICO FLAG] ')	
+# Gangmuk: New Param 16	
+flags.DEFINE_boolean('record_output_tensor_only', False,	
+                     '[ZICO FLAG] ')	
+# Gangmuk: New Param 17	
+flags.DEFINE_boolean('throttle_kernel_launch', False,	
+                     '[ZICO FLAG] ')	
+# Gangmuk: New Param 18	
+flags.DEFINE_integer('max_launched_kernels', 10,	
+                     '[ZICO FLAG] ')	
+# Gangmuk: New Param 19	
+flags.DEFINE_boolean('forward_input_profiling_mode', False,	
+                     '[ZICO FLAG] ')	
+# Gangmuk: New Param 20	
+flags.DEFINE_boolean('print_forward_input_or_allocate_output', False,	
+                     '[ZICO FLAG] ')	
+# Gangmuk: New Param 21	
+flags.DEFINE_integer('print_coordinator', 0,	
+                     '[ZICO FLAG] ')	
+flags.DEFINE_boolean('force_no_inplace', False,	
+                     '[ZICO FLAG] ')	
+
 platforms_util.define_platform_params()
 
 
@@ -706,12 +812,12 @@ class GlobalStepWatcher(threading.Thread):
         # calls to print, which can break tests.
         tf.logging.info('Starting real work at step %s at time %s' %
                         (global_step_val, time.ctime()))
-        self.start_time = time.perf_counter()
+        self.start_time = time.time()
         self.start_step = global_step_val
       if self.finish_time == 0 and global_step_val >= self.end_at_global_step:
         tf.logging.info('Finishing real work at step %s at time %s' %
                         (global_step_val, time.ctime()))
-        self.finish_time = time.perf_counter()
+        self.finish_time = time.time()
         self.finish_step = global_step_val
 
   def done(self):
@@ -736,6 +842,7 @@ def create_config_proto(params):
             make_params_from_flags.
   """
   config = tf.ConfigProto()
+
   config.allow_soft_placement = True
   if params.num_intra_threads is None:
     if params.device == 'gpu':
@@ -758,25 +865,12 @@ def create_config_proto(params):
   if params.use_unified_memory:
     config.gpu_options.experimental.use_unified_memory = (
         params.use_unified_memory)
-  if params.timestamped_allocator:
-    config.gpu_options.experimental.timestamped_allocator = (
-        params.timestamped_allocator)
-  if params.gpu_kt_max_interval > 0:
-    config.gpu_options.experimental.kernel_tracker_max_interval = (
-        params.gpu_kt_max_interval)
-  if params.gpu_kt_max_bytes > 0:
-    config.gpu_options.experimental.kernel_tracker_max_bytes = (
-        params.gpu_kt_max_bytes)
-  if params.gpu_kt_max_pending > 0:
-    config.gpu_options.experimental.kernel_tracker_max_pending = (
-        params.gpu_kt_max_pending)
   if params.xla:
     config.graph_options.optimizer_options.global_jit_level = (
         tf.OptimizerOptions.ON_1)
   if params.rewriter_config:
     rewriter_config = rewriter_config_pb2.RewriterConfig()
     text_format.Merge(params.rewriter_config, rewriter_config)
-    config.graph_options.rewrite_options.CopyFrom(rewriter_config)
   elif not params.enable_optimizations:
     config.graph_options.optimizer_options.opt_level = tf.OptimizerOptions.L0
     config.graph_options.rewrite_options.disable_meta_optimizer = True
@@ -844,8 +938,7 @@ def benchmark_one_step(sess,
                        summary_op=None,
                        show_images_per_sec=True,
                        benchmark_logger=None,
-                       collective_graph_key=0,
-                       should_output_files=True):
+                       collective_graph_key=0):
   """Advance one step of benchmarking."""
   should_profile = profiler and 0 <= step < _NUM_STEPS_TO_PROFILE
   need_options_and_metadata = (
@@ -865,7 +958,7 @@ def benchmark_one_step(sess,
     run_options = None
     run_metadata = None
   summary_str = None
-  start_time = time.perf_counter()
+  start_time = time.time()
   if summary_op is None:
     results = sess.run(fetches, options=run_options, run_metadata=run_metadata)
   else:
@@ -878,7 +971,7 @@ def benchmark_one_step(sess,
     lossval = 0.
   if image_producer is not None:
     image_producer.notify_image_consumption()
-  train_time = time.perf_counter() - start_time
+  train_time = time.time() - start_time
   step_train_times.append(train_time)
   if (show_images_per_sec and step >= 0 and
       (step == 0 or (step + 1) % params.display_every == 0)):
@@ -904,7 +997,7 @@ def benchmark_one_step(sess,
   if need_options_and_metadata:
     if should_profile:
       profiler.add_step(step, run_metadata)
-    if trace_filename and step == -2 and should_output_files:
+    if trace_filename and step == -2:
       log_fn('Dumping trace to %s' % trace_filename)
       trace_dir = os.path.dirname(trace_filename)
       if not gfile.Exists(trace_dir):
@@ -915,7 +1008,7 @@ def benchmark_one_step(sess,
           trace_file.write(trace.generate_chrome_trace_format(show_memory=True))
         else:
           trace_file.write(str(run_metadata.step_stats))
-    if partitioned_graph_file_prefix and step == -2 and should_output_files:
+    if partitioned_graph_file_prefix and step == -2:
       path, filename = os.path.split(partitioned_graph_file_prefix)
       if '.' in filename:
         base_filename, ext = filename.rsplit('.', 1)
@@ -1303,6 +1396,15 @@ class BenchmarkCNN(object):
                                                       self.params.data_name)
     self.model = model or model_config.get_model_config(
         self.params.model, self.dataset, self.params)
+    # Add-ons for supporting the colocation mode
+    if self.params.run_mode == "ZICO":
+      self.dataset2 = dataset or datasets.create_dataset(self.params.data_dir2,
+                                                         self.params.data_name2)
+      self.model2 = model_config.get_model_config(
+          self.params.model2, self.dataset2, self.params)
+    else:
+      self.model2 = None
+
     self.trace_filename = self.params.trace_file
     self.rewriter_config = self.params.rewriter_config
     autotune_threshold = self.params.autotune_threshold if (
@@ -1438,10 +1540,31 @@ class BenchmarkCNN(object):
     # number of GPUs.
     if self.params.batch_size > 0:
       self.model.set_batch_size(self.params.batch_size)
+    
+    # Add-ons for supporting the colocation mode
+    if self.model2 is not None and self.params.batch_size2 > 0:
+      self.model2.set_batch_size(self.params.batch_size2)
+      self.batch_size2 = self.params.batch_size2
+    else:
+      self.batch_size2 = None
+    
+    if self.params.gpu_id >= 0:
+      print("params.gpu_id: {}".format(self.params.gpu_id))
+      self.model.set_gpu_id(self.params.gpu_id)
+    
+    if self.model2 is not None:
+      if self.params.gpu_id2 >= 0:
+        print("params.gpu_id2: {}".format(self.params.gpu_id2))
+        self.model2.set_gpu_id(self.params.gpu_id2)
+
     self.batch_size = self.model.get_batch_size() * self.num_gpus
     if self.mode in (constants.BenchmarkMode.TRAIN,
                      constants.BenchmarkMode.TRAIN_AND_EVAL):
       self.train_batch_size = self.batch_size
+      # Add-ons for supporting the colocation mode
+      if self.batch_size2 is not None:
+        self.train_batch_size2 = self.batch_size2
+    
     else:
       self.train_batch_size = None
     if self.mode in (constants.BenchmarkMode.EVAL,
@@ -1450,6 +1573,8 @@ class BenchmarkCNN(object):
         self.eval_batch_size = self.params.eval_batch_size * self.num_gpus
       else:
         self.eval_batch_size = self.batch_size
+        # Add-ons for supporting the colocation mode
+        self.eval_batch_size2 = self.batch_size2
     else:
       self.eval_batch_size = None
     self.batch_group_size = self.params.batch_group_size
@@ -1472,8 +1597,8 @@ class BenchmarkCNN(object):
     if use_controller and not params.controller_host:
       raise ValueError('When variable_update==distributed_all_reduce '
                        'controller_host must also be specified.')
-    self.single_session = (
-        self.params.variable_update == 'distributed_all_reduce')
+    # self.single_session = (
+    #     self.params.variable_update == 'distributed_all_reduce')
     # collective_all_reduce doesn't need a controller or ps
     self.distributed_collective = (
         self.params.variable_update == 'collective_all_reduce' and
@@ -1727,7 +1852,7 @@ class BenchmarkCNN(object):
     model_benchmark_logger = None
     if self.params.benchmark_log_dir is not None:
       try:
-        from official.r1.utils.logs import logger as models_logger  # pylint: disable=g-import-not-at-top
+        from official.utils.logs import logger as models_logger  # pylint: disable=g-import-not-at-top
       except ImportError:
         tf.logging.fatal('Please include tensorflow/models to the PYTHONPATH '
                          'in order to use BenchmarkLogger. Configured '
@@ -1796,6 +1921,49 @@ class BenchmarkCNN(object):
     if self.params.variable_update == 'horovod' and self.params.horovod_device:
       log_fn('Horovod on:  %s' % self.params.horovod_device)
     log_fn('==========')
+    log_fn('[ZICO] BFC Mode')
+    log_fn('[ZICO] print_raw_internal_csv:  %s' % self.params.print_raw_internal_csv)	
+    log_fn('[ZICO] adaptive_alloc:  %s' % self.params.adaptive_alloc)	
+    log_fn('[ZICO] activate_global_pool:  %s' % self.params.activate_global_pool)	
+    log_fn('[ZICO] global_pool_release_ar:  %s' % self.params.global_pool_release_ar)	
+    log_fn('[ZICO] global_pool_release_all:  %s' % self.params.global_pool_release_all)	
+    log_fn('[ZICO] gpu_release_ar:  %s' % self.params.gpu_release_ar)	
+    log_fn('[ZICO] gpu_release_all:  %s' % self.params.gpu_release_all)	
+    log_fn('[ZICO] tighten_ar_size:  %s' % self.params.tighten_ar_size)	
+    log_fn('***************************')	
+    log_fn('[ZICO] Tensor Recording')	
+    log_fn('[ZICO] recording_tensors:  %s' % self.params.recording_tensors)
+    log_fn('[ZICO] tensor_recording_original_version:  %s' % self.params.tensor_recording_original_version)	
+    log_fn('[ZICO] skip_all_test:  %s' % self.params.skip_all_test)	
+    log_fn('[ZICO] skip_ref_count_is_one:  %s' % self.params.skip_ref_count_is_one)	
+    log_fn('[ZICO] record_output_tensor_only:  %s' % self.params.record_output_tensor_only)	
+    log_fn('***************************')
+    log_fn('[ZICO] Executor Kernel Launch')	
+    log_fn('[ZICO] throttle_kernel_launch:  %s' % self.params.throttle_kernel_launch)	
+    log_fn('[ZICO] max_launched_kernels:  %d' % self.params.max_launched_kernels)	
+    log_fn('***************************')
+    log_fn('[ZICO] forward_input')	
+    log_fn('[ZICO] forward_input_profiling_mode:  %s' %	
+           self.params.forward_input_profiling_mode)	
+    log_fn('[ZICO] print_forward_input_or_allocate_output:  %s' %	
+           self.params.print_forward_input_or_allocate_output)	
+    log_fn('***************************')	
+    log_fn('[ZICO] Coordinator')	
+    log_fn('[ZICO] print_coordinator:  %s' %	
+           self.params.print_coordinator)	
+    log_fn('***************************')	
+    # log_fn('use_virtual_devices:  %s' % self.params.use_virtual_devices)	
+    # if self.params.use_virtual_devices:	
+    #   log_fn('******** Virtual Device *******')	
+    #   log_fn('vGPU1_memory_limit:  %s' % self.params.vGPU1_memory_limit)	
+    #   log_fn('vGPU2_memory_limit:  %s' % self.params.vGPU2_memory_limit)	
+    #   log_fn('*******************************')	
+    if self.model2 is not None:	
+      log_fn('[ZICO] Model 2 is for ZICO colocation')	
+      log_fn('[ZICO] Model2:       %s' % self.model2.get_model_name())	
+      log_fn('[ZICO] Batch size2:  %s global' % (self.batch_size2 * self.num_workers))	
+      log_fn('[ZICO]               %s per device' % (self.batch_size2 //	
+                                                    len(self.raw_devices)))    
 
   def _get_params_info(self):
     """Get the common parameters info for the benchmark run.
@@ -1860,10 +2028,10 @@ class BenchmarkCNN(object):
        ValueError: unrecognized job name.
     """
     if self.params.job_name == 'ps':
-      log_fn('Running parameter server %s' % self.task_index)
+      log_fn('[ZICO] Running parameter server %s' % self.task_index)
       self.cluster_manager.join_server()
       return {}
-
+    log_fn("[ZICO] Running Process Checkpoints")
     # For distributed_all_reduce with multiple workers, drive
     # from a separate controller process.
     if self.params.variable_update == 'distributed_all_reduce':
@@ -1873,14 +2041,28 @@ class BenchmarkCNN(object):
         return
       elif self.params.job_name and self.params.job_name != 'controller':
         raise ValueError('unrecognized job name: %s' % self.params.job_name)
-
+    print("[ZICO] Running _log_benchmark_run Checkpoints")
     self._log_benchmark_run()
+    print("[ZICO] Runned _log_benchmark_run Checkpoints")
     if self._doing_eval:
       with tf.Graph().as_default():
         # TODO(laigd): freeze the graph in eval mode.
         return self._run_eval()
     else:
-      return self._benchmark_train()
+      print("[ZICO] Running _benchmark_train Checkpoints")
+      if self.params.run_mode == "SOLO":
+        return self._benchmark_train()
+      elif self.params.run_mode == "ZICO":
+        th1 = threading.Thread(target=self._modified_benchmark_train, args=([0]))
+        th2 = threading.Thread(target=self._modified_benchmark_train, args=([1]))
+        th1.start()
+        th2.start()
+        th1.join()
+        th2.join()
+        return
+      else:
+        print("\n[ZICO ERROR] benchmark_cnn.py, Not supported RUN_Mode: {}\n".format(self.params.run_mode))
+        exit(-1)
 
   def _run_eval(self):
     """Evaluate a model every self.params.eval_interval_secs.
@@ -1997,7 +2179,7 @@ class BenchmarkCNN(object):
     with self._do_eval():
       mlperf.logger.log_eval_epoch(
           mlperf.tags.EVAL_START, global_step, self.batch_size)
-      loop_start_time = start_time = time.perf_counter()
+      loop_start_time = start_time = time.time()
       # TODO(laigd): refactor the part to compute/report the accuracy. Currently
       # it only works for image models.
       top_1_accuracy_sum = 0.0
@@ -2016,14 +2198,14 @@ class BenchmarkCNN(object):
         top_1_accuracy_sum += results['top_1_accuracy']
         top_5_accuracy_sum += results['top_5_accuracy']
         if (step + 1) % self.params.display_every == 0:
-          duration = time.perf_counter() - start_time
+          duration = time.time() - start_time
           examples_per_sec = (
               self.batch_size * self.params.display_every / duration)
           log_fn('%i\t%.1f examples/sec' % (step + 1, examples_per_sec))
-          start_time = time.perf_counter()
+          start_time = time.time()
         if image_producer is not None:
           image_producer.notify_image_consumption()
-      loop_end_time = time.perf_counter()
+      loop_end_time = time.time()
       accuracy_at_1 = top_1_accuracy_sum / self.num_batches
       accuracy_at_5 = top_5_accuracy_sum / self.num_batches
       summary = tf.Summary()
@@ -2074,10 +2256,13 @@ class BenchmarkCNN(object):
       Dictionary containing training statistics (num_workers, num_steps,
       average_wall_time, images_per_sec).
     """
+
     graph = tf.Graph()
     with graph.as_default():
       build_result = self._build_graph()
+      
       if self.mode == constants.BenchmarkMode.TRAIN_AND_EVAL:
+        prinf("[ZICO] self.mode == constants.BenchmarkMode.TRAIN_AND_EVAL")
         with self.variable_mgr.reuse_variables():
           with tf.name_scope('Evaluation') as ns:
             eval_build_results = self._build_eval_graph(ns)
@@ -2086,6 +2271,36 @@ class BenchmarkCNN(object):
     (graph, result_to_benchmark) = self._preprocess_graph(graph, build_result)
     with graph.as_default():
       return self._benchmark_graph(result_to_benchmark, eval_build_results)
+
+  # Function for running two threads
+  def _modified_benchmark_train(self, which_model):
+    """
+    Run cnn in benchmark mode. Skip the backward pass if forward_only is on.
+
+    Returns:
+      Dictionary containing training statistics
+      (num_workers, num_steps, average_wall_time, images_per_sec).
+    """
+    graph = tf.Graph()
+    with graph.as_default():
+      if which_model is 0:
+        print("[ZICO] _modified_benchmark_train(which_model==0)")
+      if which_model is 1:
+        print("[ZICO] _modified_benchmark_train(which_model==1)")
+      
+      build_result = self._modified_build_graph(which_model)
+      if self.mode == constants.BenchmarkMode.TRAIN_AND_EVAL:
+        print("[ZICO] self.mode == constants.BenchmarkMode.TRAIN_AND_EVAL")
+        with self.variable_mgr.reuse_variables():	
+          with tf.name_scope('Evaluation') as ns:
+            eval_build_results = self._build_eval_graph(ns)	
+      else:	
+        eval_build_results = None	
+    print(self._preprocess_graph(graph, build_result))
+    (graph, result_to_benchmark) = self._preprocess_graph(graph, build_result)	
+    print("[ZICO] right before _benchmark_graph call which_model={}".format(which_model))	
+    with graph.as_default():	
+      return self._benchmark_graph(result_to_benchmark, eval_build_results, which_model)
 
   GPU_CACHED_INPUT_VARIABLE_NAME = 'gpu_cached_inputs'
 
@@ -2104,10 +2319,12 @@ class BenchmarkCNN(object):
       A namedtuple containing the ops/tensors that required by
       _benchmark_graph().
     """
-    if self.single_session:
+    if self.params.variable_update == 'distributed_all_reduce':
+      self.single_session = True
       (input_producer_op, enqueue_ops, fetches) = (
           self._build_model_single_session())
     else:
+      self.single_session = False
       (input_producer_op, enqueue_ops, fetches) = self._build_model()
     fetches_list = nest.flatten(list(fetches.values()))
     main_fetch_group = tf.group(*fetches_list, name='main_fetch_group')
@@ -2164,7 +2381,75 @@ class BenchmarkCNN(object):
         local_var_init_op_group=local_var_init_op_group,
         summary_op=summary_op)
 
-  def _benchmark_graph(self, graph_info, eval_graph_info):
+  # Function for running two threads
+  def _modified_build_graph(self, which_model):
+    """
+    Build the graph.
+
+    Returns:
+      A named tuple containing the ops/tensors that required by
+      _benchmark_graph().
+    """
+    
+    if self.params.variable_update == 'distributed_all_reduce':
+      self.single_session = True
+      (input_producer_op, enqueue_ops, fetches) = (
+        self.build_model_single_session())
+    else:
+      self.single_session = False
+      (input_producer_op, enqueue_ops, fetches) = self._modified_build_model(which_model)
+
+    fetches_list = nest.flatten(list(fetches.values()))
+    main_fetch_group = tf.group(*fetches_list, name='main_fetch_group')
+    execution_barrier = None
+    if (not self.single_session and self.job_name and not self.params.cross_replica_sync):
+      execution_barrier = self.add_sync_queues_and_barrier('execution_barriers_', [])
+    
+    global_step = tf.train.get_global_step()
+    with tf.device(self.global_step_device), tf.name_scope('inc_global_step'):
+      with tf.control_dependencies([main_fetch_group]):
+        fetches['inc_global_step'] = global_step.assign_add(1)
+    
+    if ((not self.single_session) and (not self.distributed_collective) and 
+        self.job_name and self.params.cross_replica_sync):
+      fetches['sync_queues'] = self.add_sync_queues_and_barrier(
+        'sync_queues_step_end_', [main_fetch_group])
+	
+    # Skips the init ops for freezable local variables in forward_only mode so	
+    # we can remove all the assign ops when converting variables to constants.	
+    with tf.name_scope('local_variable_initialization'):	
+      if self.forward_only_and_freeze:	
+        local_var_init_op = tf.variables_initializer(	
+            self._unfreezable_local_variables(tf.get_default_graph()))	
+      else:	
+        local_var_init_op = tf.local_variables_initializer()	
+    table_init_ops = tf.tables_initializer()	
+    variable_manager_init_ops = [local_var_init_op]	
+    if table_init_ops:	
+      variable_manager_init_ops.extend([table_init_ops])	
+    if not self.forward_only_and_freeze:	
+      with tf.control_dependencies([local_var_init_op]):	
+        variable_manager_init_ops.extend(self.variable_mgr.get_post_init_ops())	
+    if ((not self.single_session) and (not self.distributed_collective) and	
+        self.job_name and self.params.cross_replica_sync):	
+      # Ensure all workers execute variable_manager_init_ops before they start	
+      # executing the model.	
+      variable_manager_init_ops.append(	
+          self.add_sync_queues_and_barrier('init_ops_end_',	
+                                           variable_manager_init_ops))	
+    local_var_init_op_group = tf.group(*variable_manager_init_ops,	
+                                       name='local_var_init_op_group')	
+    summary_op = tf.summary.merge_all()	
+    return GraphInfo(
+        input_producer_op=input_producer_op,
+        enqueue_ops=enqueue_ops,
+        fetches=fetches,
+        execution_barrier=execution_barrier,
+        global_step=global_step,
+        local_var_init_op_group=local_var_init_op_group,
+        summary_op=summary_op)
+    
+  def _benchmark_graph(self, graph_info, eval_graph_info, which_model=None):
     """Benchmark the training graph.
 
     Args:
@@ -2280,24 +2565,27 @@ class BenchmarkCNN(object):
         self.params.train_dir or
         self.dataset.queue_runner_required())
     target = self.cluster_manager.get_target() if self.cluster_manager else ''
-    with sv.managed_session(
-        master=target,
-        config=create_config_proto(self.params),
-        start_standard_services=start_standard_services) as sess:
-      # Anything that can potentially raise an OutOfRangeError with 'sess' MUST
-      # be under this try block. The managed_session() context manager silently
-      # ignores OutOfRangeError, so we must catch them and wrap them with
-      # a different exception type so that they can be propagated up to the
-      # caller.
-      try:
+
+    try:
+      new_config = create_config_proto(self.params)
+      if which_model is not None:
+        new_config.gangmuk_job_id = which_model
+        print("new_config.gangmuk_job_id = {}".format(which_model))
+      else:
+        new_config.gangmuk_job_id = 0
+      with sv.managed_session(
+          master=target, 
+          config = new_config, 
+          start_standard_services=start_standard_services) as sess:
         stats = self.benchmark_with_session(
             sess, sv, graph_info, eval_graph_info, bcast_global_variables_op,
-            is_chief, summary_writer, profiler)
-      except tf.errors.OutOfRangeError:
-        raise RuntimeError(
-            'Received OutOfRangeError. Wrapping in Runtime error to avoid '
-            'Supervisor from suppressing the error. Original OutOfRangeError '
-            'with traceback:\n' + traceback.format_exc())
+            is_chief, summary_writer, profiler, which_model)
+    
+    except tf.errors.OutOfRangeError:
+      raise RuntimeError(
+          'Received OutOfRangeError. Wrapping in Runtime error to avoid '
+          'Supervisor from suppressing the error. Original OutOfRangeError '
+          'with traceback:\n' + traceback.format_exc())
 
     sv.stop()
     if profiler:
@@ -2306,7 +2594,7 @@ class BenchmarkCNN(object):
 
   def benchmark_with_session(self, sess, supervisor, graph_info,
                              eval_graph_info, bcast_global_variables_op,
-                             is_chief, summary_writer, profiler):
+                             is_chief, summary_writer, profiler, which_model=None):
     """Benchmarks the graph with the given session.
 
     Args:
@@ -2328,6 +2616,10 @@ class BenchmarkCNN(object):
       Dictionary containing training statistics (num_workers, num_steps,
       average_wall_time, images_per_sec).
     """
+    # # Is it solve?
+    # gpu_options = tf.GPUOptions(allow_growth=True)
+    # sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
+
     if self.params.backbone_model_path is not None:
       self.model.load_backbone_model(sess, self.params.backbone_model_path)
     if bcast_global_variables_op:
@@ -2394,7 +2686,7 @@ class BenchmarkCNN(object):
     accuracy_at_1 = None
     accuracy_at_5 = None
     last_eval_step = local_step
-    loop_start_time = time.perf_counter()
+    loop_start_time = time.time()
     last_average_loss = None
     while not done_fn():
       if local_step == 0:
@@ -2413,7 +2705,7 @@ class BenchmarkCNN(object):
         assert len(step_train_times) == self.num_warmup_batches
         # reset times to ignore warm up batch
         step_train_times = []
-        loop_start_time = time.perf_counter()
+        loop_start_time = time.time()
       if (summary_writer and
           (local_step + 1) % self.params.save_summaries_steps == 0):
         fetch_summary = graph_info.summary_op
@@ -2421,16 +2713,31 @@ class BenchmarkCNN(object):
         fetch_summary = None
       collective_graph_key = 7 if (
           self.params.variable_update == 'collective_all_reduce') else 0
+      
+      # timestamp for colocation mode
+      zico_ts = time.time()
+
+      if which_model is 1:
+        redefined_batch_size = self.batch_size2
+      else:
+        redefined_batch_size = self.batch_size
+
       (summary_str, last_average_loss) = benchmark_one_step(
           sess, graph_info.fetches, local_step,
-          self.batch_size * (self.num_workers
+          redefined_batch_size * (self.num_workers
                              if self.single_session else 1), step_train_times,
           self.trace_filename, self.params.partitioned_graph_file_prefix,
           profiler, image_producer, self.params, fetch_summary,
           benchmark_logger=self.benchmark_logger,
-          collective_graph_key=collective_graph_key,
-          should_output_files=(self.params.variable_update != 'horovod' or
-                               is_chief))
+          collective_graph_key=collective_graph_key)
+      if which_model is 1:
+        print("model 1: {} pid: {} real time images/sec: {}".format(
+          self.model2.get_model_name(), os.getpid(), self.batch_size/(time.time() - zico_ts)
+        ))
+      else:
+        print("model 0: {} pid: {} real time images/sec: {}".format(
+          self.model_get_model_name(), os.getpid(), self.batch_size/(time.time() - zico_ts) 
+        ))
       if summary_str is not None and is_chief:
         supervisor.summary_computed(sess, summary_str)
       local_step += 1
@@ -2470,7 +2777,7 @@ class BenchmarkCNN(object):
         log_fn('Stopping, as the model indicates its custom goal was reached')
         skip_final_eval = True
         break
-    loop_end_time = time.perf_counter()
+    loop_end_time = time.time() # The usage of time.perf_counter() (21.11.15)
     # Waits for the global step to be done, regardless of done_fn.
     if global_step_watcher:
       while not global_step_watcher.done():
@@ -2496,7 +2803,7 @@ class BenchmarkCNN(object):
     if self.mode != constants.BenchmarkMode.TRAIN_AND_EVAL:
       log_fn('-' * 64)
       # TODO(laigd): rename 'images' to maybe 'inputs'.
-      log_fn('total images/sec: %.2f' % images_per_sec)
+      log_fn('model {} total images/sec: {}'.format(which_model, images_per_sec))
       log_fn('-' * 64)
     else:
       log_fn('Done with training')
@@ -2629,7 +2936,7 @@ class BenchmarkCNN(object):
     if self.params.trt_mode:
       # Import here instead of at top, because this will crash if TensorRT is
       # not installed
-      from tensorflow.python.compiler.tensorrt import trt_convert  # pylint: disable=g-import-not-at-top
+      from tensorflow.contrib import tensorrt as trt  # pylint: disable=g-import-not-at-top
       # Avoid TF-TRT bridge from touching all variable initializer ops and their
       # dependencies, since they can directly be fetched by sess.run()s that
       # initialize the variables.
@@ -2640,7 +2947,7 @@ class BenchmarkCNN(object):
           variable_initializers, name_to_input_name)
       # pylint: enable=protected-access
 
-      graphdef = trt_convert.create_inference_graph(
+      graphdef = trt.create_inference_graph(
           graphdef,
           outputs=output_node_names + list(initializer_subgraph_ops),
           max_batch_size=self.model.get_batch_size(),
@@ -2893,6 +3200,137 @@ class BenchmarkCNN(object):
                                   phase_train)
     return (input_producer_op, enqueue_ops, fetches)
 
+
+  def _modified_build_model(self, which_model):
+    """Build the TensorFlow graph with ZICO."""
+    if which_model is 0:
+      temp_model = self.model
+      print("[ZICO] _modified_build_model(which_model==0)")
+    elif which_model is 1:
+      temp_model = self.model2
+      print("[ZICO] _modified_build_model(which_model==1)")
+    else:
+      print("[ZICO ERROR] _modified_build_model: which_model must be either 0 or 1. \
+        (current which_model value: {}".format(which_model))
+      exit(-1)
+    
+    if self.datasets_use_prefetch:
+      assert not self.params.staged_vars
+      assert not self.variable_mgr.supports_staged_vars()
+
+    # Adjust seed so different workers start read different input files.
+    if self.params.variable_update == 'horovod':
+      import horovod.tensorflow as hvd  # pylint: disable=g-import-not-at-top
+      seed_adjustment = hvd.rank()
+    else:
+      seed_adjustment = 0
+    mlperf.logger.log(key=mlperf.tags.RUN_SET_RANDOM_SEED,
+                      value=self.params.tf_random_seed + seed_adjustment)
+    tf.set_random_seed(self.params.tf_random_seed + seed_adjustment)
+    mlperf.logger.log(key=mlperf.tags.RUN_SET_RANDOM_SEED,
+                      value=4321 + seed_adjustment)
+    np.random.seed(4321 + seed_adjustment)
+    phase_train = not (self._doing_eval or self.params.forward_only)
+
+    if self._doing_eval:
+      mode_string = 'evaluation'
+    else:
+      mode_string = 'training'
+
+    log_fn('[ZICO] Generating {} model'.format(mode_string))
+    losses = []
+    device_grads = []
+    all_logits = []
+    all_accuracy_ops = {}
+    gpu_compute_stage_ops = []
+    gpu_grad_stage_ops = []
+
+    with tf.device(self.global_step_device):
+      global_step = tf.train.get_or_create_global_step()
+      self._maybe_initialize_fp16()
+
+    # Build the processing and model for the worker.
+    input_producer_op = None
+    with tf.name_scope('input_processing'):
+      input_processing_info = self._build_input_processing(shift_ratio=0)
+      if input_processing_info.input_producer_op is not None:
+        input_producer_op = tf.group(*input_processing_info.input_producer_op)
+    update_ops = None
+    staging_delta_ops = []
+
+    for device_num in range(len(self.devices)):
+      with tf.name_scope('tower_%i' % device_num) as name_scope, (
+          self.variable_mgr.create_outer_variable_scope(device_num)):
+        results = self._modified_add_forward_pass_and_gradients(
+            phase_train, device_num, device_num, input_processing_info,
+            gpu_compute_stage_ops, gpu_grad_stage_ops,
+            which_model, temp_model)
+
+        if self.params.backbone_model_path:
+          # self.model.add_backbone_saver()
+          temp_model.add_backbone_saver()
+
+        if phase_train:
+          losses.append(results['loss'])
+          device_grads.append(results['gradvars'])
+        else:
+          all_logits.append(results['logits'])
+        if not phase_train or self.params.print_training_accuracy:
+          for name, op in results.items():
+            if name.startswith('accuracy:'):
+              key = name[9:]
+              if key not in all_accuracy_ops:
+                all_accuracy_ops[key] = []
+              all_accuracy_ops[key].append(op)
+
+        if device_num == 0:
+          # Retain the Batch Normalization updates operations only from the
+          # first tower. These operations update the moving mean and moving
+          # variance variables, which are updated (but not used) during
+          # training, and used during evaluation. The moving mean and variance
+          # approximate the true mean and variance across all images in the
+          # dataset. Therefore, in replicated mode, these moving averages would
+          # be almost identical for each tower, and so we only update and save
+          # the moving averages for one tower. In parameter server mode, all
+          # towers share a copy of the variables so we also only need to update
+          # and save the moving averages once.
+          update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS, name_scope)
+          if self.datasets_use_prefetch:
+            assert not self.variable_mgr.staging_delta_ops
+          else:
+            staging_delta_ops = list(self.variable_mgr.staging_delta_ops)
+
+    enqueue_ops = []
+    if not self.datasets_use_prefetch:
+      if self.variable_mgr.supports_staged_vars():
+        for staging_ops in self.variable_mgr.staging_vars_on_devices:
+          gpu_compute_stage_ops.extend(
+              [put_op for _, (put_op, _) in six.iteritems(staging_ops)])
+      enqueue_ops.append(tf.group(*gpu_compute_stage_ops,
+                                  name='gpu_compute_stage_ops_group'))
+      if gpu_grad_stage_ops:
+        staging_delta_ops += gpu_grad_stage_ops
+      if staging_delta_ops:
+        enqueue_ops.append(tf.group(*(staging_delta_ops)))
+
+    if (self.mode == constants.BenchmarkMode.TRAIN_AND_EVAL and
+        self.params.variable_update == 'replicated'):
+      # We need to get all the update ops instead of only those for the first
+      # tower. This is because during evaluation, each tower will read from its
+      # own tower's moving averages instead of the first tower's moving
+      # averages.
+      # TODO(reedwm): Have each tower read from the first tower's moving
+      # averages for a slight performance gain.
+      update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+      mlperf.logger.log(key=mlperf.tags.INPUT_BN_SPAN,
+                        value=self.batch_size // len(self.raw_devices))
+
+    fetches = self._build_fetches(global_step, all_logits, losses, device_grads,
+                                  enqueue_ops, update_ops, all_accuracy_ops,
+                                  phase_train)
+    print((input_producer_op, enqueue_ops, fetches))
+    return (input_producer_op, enqueue_ops, fetches)
+
   def _build_fetches(self, global_step, all_logits, losses, device_grads,
                      enqueue_ops, update_ops, all_accuracy_ops, phase_train):
     """Complete construction of model graph, populating the fetches map."""
@@ -2906,10 +3344,11 @@ class BenchmarkCNN(object):
         key = name[len(constants.UNREDUCED_ACCURACY_OP_PREFIX):]
         fetches[key] = tf.concat(ops, 0)
       else:
-        fetches[name] = (
-            tf.reduce_sum(ops) /
-            (self.batch_size *
-             (self.num_workers if self.single_session else 1)))
+        # fetches[name] = (
+        #     tf.reduce_sum(ops) /
+        #     (self.batch_size *
+        #      (self.num_workers if self.single_session else 1)))
+        fetches[name] = tf.reduce_sum(ops) / self.batch_size
         if self.task_index == 0 and self.params.summary_verbosity >= 1:
           tf.summary.scalar(name, fetches[name])
 
@@ -3248,7 +3687,7 @@ class BenchmarkCNN(object):
       aggmeth = tf.AggregationMethod.DEFAULT
       scaled_loss = (total_loss if self.loss_scale is None
                      else total_loss * self.loss_scale)
-      grads = tf.gradients(scaled_loss, params, aggregation_method=aggmeth)
+      grads = tf.gradients(scaled_loss, params, aggregation_method=aggmeth, colocate_gradients_with_ops=True)
       if self.params.sparse_to_dense_grads:
         # Passing a sparse gradient to convert_to_tensor turns it into a dense
         # gradient. A sparse gradient is an instance of tf.IndexedSlices.
@@ -3352,6 +3791,245 @@ class BenchmarkCNN(object):
       logits, loss, grads = unpack_forward_pass_and_gradients_output(outputs)
       return make_results(logits, loss, grads)
 
+	# ZICO-tuned	
+  def _modified_add_forward_pass_and_gradients(self,	
+                                     phase_train,	
+                                     rel_device_num,	
+                                     abs_device_num,	
+                                     input_processing_info,	
+                                     gpu_compute_stage_ops,	
+                                     gpu_grad_stage_ops,	
+                                     which_model=1,	
+                                     temp_model=None):	
+    """Add ops for forward-pass and gradient computations."""	
+    # Gangmuk	
+    ############################	
+    # Re-define self.model for #	
+    ############################	
+    if which_model is 1:	
+      redefined_model = temp_model	
+    else:	
+      redefined_model = self.model	
+    nclass = self.dataset.num_classes	
+    if self.datasets_use_prefetch:	
+      assert input_processing_info.multi_device_iterator_input, (	
+          'multi_device_iterator_input cannot be None if '	
+          'datasets_use_prefetch=True')	
+      input_list = (	
+          input_processing_info.multi_device_iterator_input[rel_device_num])	
+    else:	
+      if not self.dataset.use_synthetic_gpu_inputs():	
+        input_producer_stage = input_processing_info.input_producer_stages[	
+            rel_device_num]	
+        with tf.device(self.cpu_device):	
+          host_input_list = input_producer_stage.get()	
+        with tf.device(self.raw_devices[rel_device_num]):	
+          gpu_compute_stage = data_flow_ops.StagingArea(	
+              [inp.dtype for inp in host_input_list],	
+              shapes=[inp.get_shape() for inp in host_input_list])	
+          # The CPU-to-GPU copy is triggered here.	
+          gpu_compute_stage_op = gpu_compute_stage.put(host_input_list)	
+          input_list = gpu_compute_stage.get()	
+          gpu_compute_stage_ops.append(gpu_compute_stage_op)	
+      else:	
+        with tf.device(self.raw_devices[rel_device_num]):	
+          # Minor hack to avoid H2D copy when using synthetic data	
+          # Gangmuk	
+          # input_list = self.model.get_synthetic_inputs(	
+          #     BenchmarkCNN.GPU_CACHED_INPUT_VARIABLE_NAME, nclass)	
+          input_list = redefined_model.get_synthetic_inputs(	
+              BenchmarkCNN.GPU_CACHED_INPUT_VARIABLE_NAME, nclass)	
+    # Labels reshaping happens all on gpu:0. Reshaping synthetic labels on	
+    # multiple devices slows down XLA computation for an unknown reason.	
+    # TODO(b/116875203): Find/address root cause of XLA slow down.	
+    labels_device_placement_hack = (	
+        self.dataset.use_synthetic_gpu_inputs() and self.params.xla_compile)	
+    def device_aware_reshape(tensor, shape):	
+      device = self.devices[rel_device_num]	
+      # Labels are int32, place reshapes on gpu:0 (no device placement) when the	
+      # hack is enabled.	
+      if labels_device_placement_hack and tensor.dtype == tf.int32:	
+        device = ''	
+      with tf.device(device):	
+        return tf.reshape(tensor, shape=shape)	
+    subset = 'validation' if self._doing_eval else 'train'	
+    # Gangmuk	
+    # input_shapes = self.model.get_input_shapes(subset)	
+    input_shapes = redefined_model.get_input_shapes(subset)	
+    input_list = [	
+        device_aware_reshape(input_list[i], shape=input_shapes[i])	
+        for i in range(len(input_list))	
+    ]	
+    def forward_pass_and_gradients():	
+      """Builds forward pass and gradient computation network.	
+      When phase_train=True and print_training_accuracy=False:	
+        return [loss] + grads	
+      When phase_train=True and print_training_accuracy=True:	
+        return [logits, loss] + grads	
+      When phase_train=False,	
+        return [logits]	
+      Its output can always be unpacked by	
+      ```	
+        outputs = forward_pass_and_gradients()	
+        logits, loss, grads = unpack_forward_pass_and_gradients_output(outputs)	
+      ```	
+      Returns:	
+        outputs: A list of tensors depending on different modes.	
+      """	
+      #####################################################	
+      # Gangmuk: Where the network is built               #	
+      # build_network_result = self.model.build_network(  #	
+      #     input_list, phase_train, nclass)              #	
+      #####################################################	
+      build_network_result = redefined_model.build_network(	
+          input_list, phase_train, nclass)	
+      logits = build_network_result.logits	
+      if not phase_train:	
+        return [logits]	
+      # base_loss = self.model.loss_function(input_list, build_network_result)	
+      # Gangmuk	
+      base_loss = redefined_model.loss_function(input_list, build_network_result)	
+      params = self.variable_mgr.trainable_variables_on_device(	
+          rel_device_num, abs_device_num)	
+      l2_loss = None	
+      total_loss = base_loss	
+      with tf.name_scope('l2_loss'):	
+        fp32_params = params	
+        # Gangmuk	
+        # if self.model.data_type == tf.float16 and self.params.fp16_vars:	
+        if redefined_model.data_type == tf.float16 and self.params.fp16_vars:	
+          # fp16 reductions are very slow on GPUs, so cast to fp32 before	
+          # calling tf.nn.l2_loss and tf.add_n.	
+          # TODO(b/36217816): Once the bug is fixed, investigate if we should do	
+          # this reduction in fp16.	
+          fp32_params = (tf.cast(p, tf.float32) for p in params)	
+        # Gangmuk	
+        # filtered_params = self.model.filter_l2_loss_vars(fp32_params)	
+        filtered_params = redefined_model.filter_l2_loss_vars(fp32_params)	
+        if rel_device_num == len(self.devices) - 1:	
+          # We compute the L2 loss for only one device instead of all of them,	
+          # because the L2 loss for each device is the same. To adjust for this,	
+          # we multiply the L2 loss by the number of devices. We choose the	
+          # last device because for some reason, on a Volta DGX1, the first four	
+          # GPUs take slightly longer to complete a step than the last four.	
+          # TODO(reedwm): Shard the L2 loss computations across GPUs.	
+          if self.params.single_l2_loss_op:	
+            # TODO(reedwm): If faster, create a fused op that does the L2 loss	
+            # on multiple tensors, and use that instead of concatenating	
+            # tensors.	
+            reshaped_params = [tf.reshape(p, (-1,)) for p in filtered_params]	
+            l2_loss = tf.nn.l2_loss(tf.concat(reshaped_params, axis=0))	
+          else:	
+            l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in filtered_params])	
+      weight_decay = self.params.weight_decay	
+      mlperf.logger.log(key=mlperf.tags.OPT_WEIGHT_DECAY, value=weight_decay)	
+      if (weight_decay is not None and weight_decay != 0. and	
+          l2_loss is not None):	
+        mlperf.logger.log(key=mlperf.tags.MODEL_L2_REGULARIZATION,	
+                          value=weight_decay)	
+        total_loss += len(self.devices) * weight_decay * l2_loss	
+      aggmeth = tf.AggregationMethod.DEFAULT	
+      scaled_loss = (total_loss if self.loss_scale is None	
+                     else total_loss * self.loss_scale)	
+      # Gangmuk	
+      # colocate_gradients_with_ops=True is added	
+      grads = tf.gradients(scaled_loss, params, aggregation_method=aggmeth, colocate_gradients_with_ops=True)	
+      if self.params.sparse_to_dense_grads:	
+        # Passing a sparse gradient to convert_to_tensor turns it into a dense	
+        # gradient. A sparse gradient is an instance of tf.IndexedSlices.	
+        # convert_to_tensor does not modify dense tensors.	
+        grads = [tf.convert_to_tensor(g) for g in grads]	
+      if self.loss_scale is not None:	
+        # TODO(reedwm): If automatic loss scaling is not used, we could avoid	
+        # these multiplications by directly modifying the learning rate instead.	
+        # If this is done, care must be taken to ensure that this scaling method	
+        # is correct, as some optimizers square gradients and do other	
+        # operations which might not be compatible with modifying both the	
+        # gradients and the learning rate.	
+        grads = [	
+            grad * tf.cast(1. / self.loss_scale, grad.dtype) for grad in grads	
+        ]	
+      if self.params.variable_update == 'horovod':	
+        import horovod.tensorflow as hvd  # pylint: disable=g-import-not-at-top	
+        if self.params.horovod_device:	
+          horovod_device = '/%s:0' % self.params.horovod_device	
+        else:	
+          horovod_device = ''	
+        # All-reduce gradients using Horovod.	
+        grads = [hvd.allreduce(grad, average=False, device_dense=horovod_device)	
+                 for grad in grads]	
+      if self.params.staged_vars:	
+        grad_dtypes = [grad.dtype for grad in grads]	
+        grad_shapes = [grad.shape for grad in grads]	
+        grad_stage = data_flow_ops.StagingArea(grad_dtypes, grad_shapes)	
+        grad_stage_op = grad_stage.put(grads)	
+        # In general, this decouples the computation of the gradients and	
+        # the updates of the weights.	
+        # During the pipeline warm up, this runs enough training to produce	
+        # the first set of gradients.	
+        gpu_grad_stage_ops.append(grad_stage_op)	
+        grads = grad_stage.get()	
+      if self.params.loss_type_to_report == 'total_loss':	
+        loss = total_loss	
+      else:	
+        loss = base_loss	
+      if self.params.print_training_accuracy:	
+        return [logits, loss] + grads	
+      else:	
+        return [loss] + grads	
+    def unpack_forward_pass_and_gradients_output(forward_pass_and_grad_outputs):	
+      """Unpacks outputs from forward_pass_and_gradients.	
+      Args:	
+        forward_pass_and_grad_outputs: Output from forward_pass_and_gradients.	
+      Returns:	
+        logits: Unscaled probability distribution from forward pass.	
+          If unavailable, None is returned.	
+        loss: Loss function result from logits.	
+          If unavailable, None is returned.	
+        grads: Gradients for all trainable variables.	
+          If unavailable, None is returned.	
+      """	
+      logits = None	
+      # logits is only fetched in non-train mode or when	
+      # print_training_accuracy is set.	
+      if not phase_train or self.params.print_training_accuracy:	
+        logits = forward_pass_and_grad_outputs.pop(0)	
+      loss = (	
+          forward_pass_and_grad_outputs[0]	
+          if forward_pass_and_grad_outputs else None)	
+      grads = (	
+          forward_pass_and_grad_outputs[1:]	
+          if forward_pass_and_grad_outputs else None)	
+      return logits, loss, grads	
+    def make_results(logits, loss, grads):
+      """Generate results based on logits, loss and grads."""
+      results = {}  # The return value
+
+      if logits is not None:
+        results['logits'] = logits
+        # Gangmuk
+        # accuracy_ops = self.model.accuracy_function(input_list, logits)
+        accuracy_ops = redefined_model.accuracy_function(input_list, logits)
+        for name, op in accuracy_ops.items():
+          results['accuracy:' + name] = op
+
+      if loss is not None:
+        results['loss'] = loss
+
+      if grads is not None:
+        param_refs = self.variable_mgr.trainable_variables_on_device(
+            rel_device_num, abs_device_num, writable=True)
+        results['gradvars'] = list(zip(grads, param_refs))
+
+      return results
+
+    with tf.device(self.devices[rel_device_num]):
+      outputs = maybe_compile(forward_pass_and_gradients, self.params)
+      logits, loss, grads = unpack_forward_pass_and_gradients_output(outputs)
+      return make_results(logits, loss, grads)
+#####################################################################################	
+################ End of _modified_add_forward_pass_and_gradients ####################	
+#####################################################################################  
   def get_input_preprocessor(self):
     """Returns the image preprocessor to used, based on the model.
 
@@ -3543,6 +4221,6 @@ def setup(params):
 
 def maybe_compile(computation, params):
   if params and params.xla_compile:
-    return tf.xla.experimental.compile(computation)
+    return xla.compile(computation)
   else:
     return computation()

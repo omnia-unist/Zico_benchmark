@@ -24,7 +24,7 @@ from __future__ import print_function
 
 from absl import app
 from absl import flags as absl_flags
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 
 import benchmark_cnn
 import cnn_util
@@ -56,8 +56,8 @@ def main(positional_arguments):
                      % positional_arguments[1:])
 
   # gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gpu_max_mem, allow_growth=True)
-  gpu_options = tf.GPUOptions(allow_growth=True)
-  sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
+  # gpu_options = tf.GPUOptions(allow_growth=True)
+  # sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
 
   # gpus = tf.config.experimental.list_physical_devices('GPU')
   # if gpus:

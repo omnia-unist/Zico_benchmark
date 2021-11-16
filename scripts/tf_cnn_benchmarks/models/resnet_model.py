@@ -36,10 +36,12 @@ from __future__ import print_function
 
 import numpy as np
 from six.moves import xrange  # pylint: disable=redefined-builtin
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 import datasets
 import mlperf
 from models import model as model_lib
+import pdb
+from models import device_placer
 
 
 def bottleneck_block_v1(cnn, depth, depth_bottleneck, stride):
@@ -288,6 +290,14 @@ class ResnetModel(model_lib.CNNModel):
     if params and params.resnet_base_lr:
       base_lr = params.resnet_base_lr
 
+    # ZICO-tuned
+    if params.gpu_id < 0:
+      print("[ZICO ERROR] gpu id: {}. It is less than 0. (resnet_model.py)".format(params.gpu_id))
+      exit(-1)
+    else:
+      self.gpu_id = params.gpu_id
+      print("[ZICO] gpu_id: {}.  (resent_model.py)".format(self.gpu_id))
+
     super(ResnetModel, self).__init__(model, 224, batch_size, base_lr,
                                       layer_counts, params=params)
     if 'v2' in model:
@@ -298,6 +308,15 @@ class ResnetModel(model_lib.CNNModel):
       self.version = 'v1'
 
   def add_inference(self, cnn):
+  
+      # Based on model version. (resnet50, resnet50_v2)
+    if self.version == 'v1':
+      self.gpu_id = 0
+    else:
+      self.gpu_id = 1
+      pdb.set_trace()
+  
+  
     if self.layer_counts is None:
       raise ValueError('Layer counts not specified for %s' % self.get_model())
     # Drop batch size from shape logging.
@@ -322,6 +341,34 @@ class ResnetModel(model_lib.CNNModel):
       cnn.batch_norm()
       cnn.top_layer = tf.nn.relu(cnn.top_layer)
     cnn.spatial_mean()
+    
+    # Should tf.device needs to fix on gpu:0 - 21.11.15
+    # with tf.device("/gpu:0"):
+    #   if self.layer_counts is None:
+    #     raise ValueError('Layer counts not specified for %s' % self.get_model())
+    #   # Drop batch size from shape logging.
+    #   mlperf.logger.log(key=mlperf.tags.MODEL_HP_INITIAL_SHAPE,
+    #                     value=cnn.top_layer.shape.as_list()[1:])
+    #   cnn.use_batch_norm = True
+    #   cnn.batch_norm_config = {'decay': 0.9, 'epsilon': 1e-5, 'scale': True}
+    #   cnn.conv(64, 7, 7, 2, 2, mode='SAME_RESNET', use_batch_norm=True)
+    #   cnn.mpool(3, 3, 2, 2, mode='SAME')
+    #   for _ in xrange(self.layer_counts[0]):
+    #     bottleneck_block(cnn, 256, 64, 1, self.version)
+    #   for i in xrange(self.layer_counts[1]):
+    #     stride = 2 if i == 0 else 1
+    #     bottleneck_block(cnn, 512, 128, stride, self.version)
+    #   for i in xrange(self.layer_counts[2]):
+    #     stride = 2 if i == 0 else 1
+    #     bottleneck_block(cnn, 1024, 256, stride, self.version)
+    #   for i in xrange(self.layer_counts[3]):
+    #     stride = 2 if i == 0 else 1
+    #     bottleneck_block(cnn, 2048, 512, stride, self.version)
+    #   if self.version == 'v2':
+    #     cnn.batch_norm()
+    #     cnn.top_layer = tf.nn.relu(cnn.top_layer)
+    #   cnn.spatial_mean()
+
 
   def get_learning_rate(self, global_step, batch_size):
     rescaled_lr = self.get_scaled_base_learning_rate(batch_size)
@@ -430,6 +477,33 @@ class ResnetCifar10Model(model_lib.CNNModel):
       cnn.batch_norm()
       cnn.top_layer = tf.nn.relu(cnn.top_layer)
     cnn.spatial_mean()
+
+    # Should tf.device needs to fix on gpu:0 - 21.11.15
+    # with tf.device("/gpu:0"):
+    #   if self.layer_counts is None:
+    #     raise ValueError('Layer counts not specified for %s' % self.get_model())
+    #   cnn.use_batch_norm = True
+    #   cnn.batch_norm_config = {'decay': 0.9, 'epsilon': 1e-5, 'scale': True}
+    #   if self.version == 'v2':
+    #     cnn.conv(16, 3, 3, 1, 1, use_batch_norm=True)
+    #   else:
+    #     cnn.conv(16, 3, 3, 1, 1, activation=None, use_batch_norm=True)
+    #   for i in xrange(self.layer_counts[0]):
+    #     # reshape to batch_size x 16 x 32 x 32
+    #     residual_block(cnn, 16, 1, self.version)
+    #   for i in xrange(self.layer_counts[1]):
+    #     # Subsampling is performed at the first convolution with a stride of 2
+    #     stride = 2 if i == 0 else 1
+    #     # reshape to batch_size x 32 x 16 x 16
+    #     residual_block(cnn, 32, stride, self.version)
+    #   for i in xrange(self.layer_counts[2]):
+    #     stride = 2 if i == 0 else 1
+    #     # reshape to batch_size x 64 x 8 x 8
+    #     residual_block(cnn, 64, stride, self.version)
+    #   if self.version == 'v2':
+    #     cnn.batch_norm()
+    #     cnn.top_layer = tf.nn.relu(cnn.top_layer)
+    #   cnn.spatial_mean()
 
   def get_learning_rate(self, global_step, batch_size):
     num_batches_per_epoch = int(50000 / batch_size)
