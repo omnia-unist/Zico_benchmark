@@ -26,7 +26,7 @@ import logging
 import re
 
 import six
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 import benchmark_cnn
 import datasets
 import mlperf

@@ -22,7 +22,7 @@ import collections as pycoll
 import re
 
 from six.moves import xrange  # pylint: disable=redefined-builtin
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 
 # pylint: disable=g-direct-tensorflow-import,g-import-not-at-top
 try:

@@ -23,7 +23,7 @@ import unittest
 
 from absl import app
 from absl import flags as absl_flags
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 
 import all_reduce_benchmark_test
 import allreduce_test

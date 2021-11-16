@@ -20,7 +20,7 @@ from __future__ import print_function
 
 from collections import namedtuple
 
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 
 import convnet_builder
 import mlperf
@@ -49,6 +49,14 @@ class Model(object):
     self.batch_size = batch_size
     self.default_batch_size = batch_size
     self.learning_rate = learning_rate
+ 
+    # Zico-tuned
+    if params:
+      self.gpu_id = params.gpu_id
+      print("[ZICO] model.py params.gpu_id: {}".format(params.gpu_id))
+    else:
+      self.gpu_id = -3
+ 
     # TODO(reedwm) Set custom loss scales for each model instead of using the
     # default of 128.
     self.fp16_loss_scale = fp16_loss_scale
@@ -72,6 +80,11 @@ class Model(object):
 
   def set_batch_size(self, batch_size):
     self.batch_size = batch_size
+
+  # Zico-tuned
+  def set_gpu_id(self, gpu_id):
+    self.gpu_id = gpu_id
+    print("[ZICO] set_gpu_id: {}".format(gpu_id))
 
   def get_default_batch_size(self):
     return self.default_batch_size

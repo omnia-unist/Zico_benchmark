@@ -23,12 +23,12 @@ from __future__ import print_function
 import contextlib
 import re
 
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 
 import allreduce
 import batch_allreduce
 import variable_mgr_util
-
+import time
 
 class VariableMgr(object):
   """Abstract superclass for class used by BenchmarkCNN to control variables.
@@ -235,13 +235,20 @@ class VariableMgrLocalFetchFromPS(VariableMgr):
     return agg_grads
 
   def get_devices(self):
+    print("[ZICO] Get Devices")
     raw_devices = self.benchmark_cnn.raw_devices
+    print("[ZICO] raw_devices: ", raw_devices)
+    print("[ZICO] Type of raw_devices : ", type(raw_devices))
+
     if self.benchmark_cnn.local_parameter_device_flag == 'gpu':
+      print("[ZICO] local parameter device == gpu")
       return [
           variable_mgr_util.ParamServerDeviceSetter(d, raw_devices)
           for d in raw_devices
       ]
     else:
+      print("[ZICO] local parameter device != gpu")
+      print("[ZICO] raw_devices: ", raw_devices)
       return [
           tf.train.replica_device_setter(
               worker_device=d,
@@ -669,8 +676,8 @@ class VariableMgrDistributedFetchFromPS(VariableMgr):
     return agg_grads
 
   def get_devices(self):
-    ps_strategy = variable_mgr_util.GreedyLoadBalancingStrategy(
-        self.benchmark_cnn.num_ps, variable_mgr_util.byte_size_load_fn)
+    ps_strategy = tf.contrib.training.GreedyLoadBalancingStrategy(
+        self.benchmark_cnn.num_ps, tf.contrib.training.byte_size_load_fn)
     return [
         tf.train.replica_device_setter(
             worker_device=d,

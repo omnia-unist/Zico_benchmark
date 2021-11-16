@@ -22,7 +22,7 @@ import contextlib
 import copy
 import os
 
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 from tensorflow.contrib import slim as contrib_slim
 
 slim = contrib_slim

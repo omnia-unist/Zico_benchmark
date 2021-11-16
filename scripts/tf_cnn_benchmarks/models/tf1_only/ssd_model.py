@@ -35,7 +35,7 @@ import multiprocessing
 import os
 import re
 import threading
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 
 # pylint: disable=g-direct-tensorflow-import
 import constants

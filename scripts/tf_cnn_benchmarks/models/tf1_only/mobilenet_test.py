@@ -20,7 +20,7 @@ from __future__ import print_function
 
 import copy
 
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 
 from models.tf1_only import mobilenet
 from models.tf1_only import mobilenet_conv_blocks as ops

@@ -33,7 +33,7 @@ import unittest
 from absl import flags as absl_flags
 import portpicker
 import six
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 import flags
 import test_util
 from platforms import util as platforms_util
