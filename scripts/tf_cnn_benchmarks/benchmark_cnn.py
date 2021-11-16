@@ -2570,9 +2570,10 @@ class BenchmarkCNN(object):
       new_config = create_config_proto(self.params)
       if which_model is not None:
         new_config.gangmuk_job_id = which_model
-        print("new_config.gangmuk_job_id = {}".format(which_model))
+        print("[ZICO] new_config.gangmuk_job_id = {}".format(which_model))
       else:
         new_config.gangmuk_job_id = 0
+
       with sv.managed_session(
           master=target, 
           config = new_config, 
@@ -2736,7 +2737,7 @@ class BenchmarkCNN(object):
         ))
       else:
         print("model 0: {} pid: {} real time images/sec: {}".format(
-          self.model_get_model_name(), os.getpid(), self.batch_size/(time.time() - zico_ts) 
+          self.model.get_model_name(), os.getpid(), self.batch_size/(time.time() - zico_ts) 
         ))
       if summary_str is not None and is_chief:
         supervisor.summary_computed(sess, summary_str)

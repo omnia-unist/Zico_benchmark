@@ -27,12 +27,14 @@ import logging
 import datetime
 
 import perfzero.utils as utils
+import perfzero.perfzero_config as perfzero_config
+import perfzero.report_utils as report_utils
 
 
 class BenchmarkRunner(object):
   """Execute benchmark and report results."""
 
-  def __init__(self, config):
+  def __init__(self, config= None):
     project_dir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
     workspace_dir = os.path.join(project_dir, 'workspace')
     self.site_packages_dir = os.path.join(workspace_dir, 'site-packages')

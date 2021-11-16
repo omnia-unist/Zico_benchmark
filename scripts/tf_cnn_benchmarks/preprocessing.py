@@ -24,8 +24,9 @@ import math
 from six.moves import xrange  # pylint: disable=redefined-builtin
 import tensorflow as tf
 
-# pylint: disable=g-direct-tensorflow-import
 import cnn_util
+from tensorflow.contrib.data.python.ops import threadpool
+from tensorflow.contrib.image.python.ops import distort_image_ops
 from tensorflow.python.data.ops import multi_device_iterator_ops
 from tensorflow.python.framework import function
 from tensorflow.python.layers import utils
@@ -428,17 +429,6 @@ def distort_color(image, batch_position=0, distort_color_in_yiq=False,
   Returns:
     color-distorted image
   """
-  if distort_color_in_yiq:
-    try:
-      from tensorflow.contrib.image.python.ops import distort_image_ops  # pylint: disable=g-import-not-at-top
-    except ImportError:
-      raise ValueError(
-          'In TF2, you cannot pass --distortions unless you also pass '
-          '--nodistort_color_in_yiq. This is because the random_hsv_in_yiq was '
-          'removed in TF2. --distortions does not improve accuracy on resnet '
-          'so it is not recommended. --nodistort_color_in_yiq also has no '
-          'impact on accuracy, but may hurt performance.')
-
   with tf.name_scope(scope or 'distort_color'):
 
     def distort_fn_0(image=image):
@@ -553,7 +543,7 @@ class InputPreprocessor(object):
     raise NotImplementedError('Must be implemented by subclass.')
 
   def create_iterator(self, ds):
-    ds_iterator = tf.data.make_initializable_iterator(ds)
+    ds_iterator = tf.compat.v1.data.make_initializable_iterator(ds)
     tf.add_to_collection(tf.GraphKeys.TABLE_INITIALIZERS,
                          ds_iterator.initializer)
     return ds_iterator
@@ -697,9 +687,13 @@ class BaseImagePreprocessor(InputPreprocessor):
             num_parallel_batches=num_splits))
     ds = ds.prefetch(buffer_size=num_splits)
     if num_threads:
-      options = tf.data.Options()
-      options.experimental_threading.private_threadpool_size = num_threads
-      ds = ds.with_options(options)
+      ds = threadpool.override_threadpool(
+        ds,
+        threadpool.PrivateThreadPool(
+          num_threads, display_name='input_pipeline_thread_pool'
+        )
+      )
+
     return ds
 
 
@@ -802,7 +796,7 @@ class ImagenetPreprocessor(RecordInputImagePreprocessor):
   def preprocess(self, image_buffer, bbox, batch_position):
     # pylint: disable=g-import-not-at-top
     try:
-      from official.r1.resnet.imagenet_preprocessing import preprocess_image
+      from official.resnet.imagenet_preprocessing import preprocess_image
     except ImportError:
       tf.logging.fatal('Please include tensorflow/models to the PYTHONPATH.')
       raise
@@ -929,15 +923,7 @@ class COCOPreprocessor(BaseImagePreprocessor):
           dataset=dataset,
           subset=subset,
           train=self.train,
-          datasets_repeat_cached_sample=params.datasets_repeat_cached_sample,
-          num_threads=params.datasets_num_private_threads,
-          datasets_use_caching=params.datasets_use_caching,
-          datasets_parallel_interleave_cycle_length=(
-              params.datasets_parallel_interleave_cycle_length),
-          datasets_sloppy_parallel_interleave=(
-              params.datasets_sloppy_parallel_interleave),
-          datasets_parallel_interleave_prefetch=(
-              params.datasets_parallel_interleave_prefetch))
+          datasets_repeat_cached_sample=params.datasets_repeat_cached_sample)
       ds_iterator = self.create_iterator(ds)
 
       # Training data: 4 tuple
@@ -1095,9 +1081,12 @@ class COCOPreprocessor(BaseImagePreprocessor):
             drop_remainder=train))
     ds = ds.prefetch(buffer_size=num_splits)
     if num_threads:
-      options = tf.data.Options()
-      options.experimental_threading.private_threadpool_size = num_threads
-      ds = ds.with_options(options)
+      ds = threadpool.override_threadpool(
+        ds,
+        threadpool.PrivateThreadPool(
+          num_threads, display_name='input_pipeline_thread_pool'
+        )
+      )
     return ds
 
   def supports_datasets(self):
@@ -1256,9 +1245,12 @@ class LibrispeechPreprocessor(InputPreprocessor):
         drop_remainder=True)
     ds = ds.prefetch(buffer_size=num_splits)
     if num_threads:
-      options = tf.data.Options()
-      options.experimental_threading.private_threadpool_size = num_threads
-      ds = ds.with_options(options)
+      ds = threadpool.override_threadpool(
+        ds,
+        threadpool.PrivateThreadPool(
+          num_threads, display_name='input_pipeline_thread_pool'
+        )
+      )
     return ds
 
   def minibatch(self, dataset, subset, params, shift_ratio=-1):

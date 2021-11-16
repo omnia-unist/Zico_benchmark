@@ -238,7 +238,7 @@ class VariableMgrLocalFetchFromPS(VariableMgr):
     print("[ZICO] Get Devices")
     raw_devices = self.benchmark_cnn.raw_devices
     print("[ZICO] raw_devices: ", raw_devices)
-    print("[ZICO] Type of raw_devices : ", type(raw_devices))
+    print("[ZICO] Type of raw_devices: ", type(raw_devices))
 
     if self.benchmark_cnn.local_parameter_device_flag == 'gpu':
       print("[ZICO] local parameter device == gpu")

@@ -23,7 +23,6 @@ import operator
 
 import tensorflow as tf
 
-# pylint: disable=g-direct-tensorflow-import
 from tensorflow.python.framework import ops
 from tensorflow.python.ops import data_flow_ops
 from tensorflow.python.ops import gradients_impl
@@ -566,7 +565,7 @@ def aggregate_single_gradient_using_copy(grad_and_vars, use_mean,
   grads = [g for g, _ in grad_and_vars]
   if any(isinstance(g, tf.IndexedSlices) for g in grads):
     # TODO(reedwm): All-reduce IndexedSlices more effectively.
-    grad = gradients_impl._AggregateIndexedSlicesGradients(grads) # pylint: disable=protected-access
+    grad = gradients_impl._AggregateIndexedSlicesGradients(grads)  # pylint: disable=protected-access
   else:
     grad = tf.add_n(grads)
 
