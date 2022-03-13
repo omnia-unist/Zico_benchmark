@@ -113,6 +113,7 @@ def get_training_outputs_from_logs(logs, print_training_accuracy):
     that is in the format above. top_1_accuracy and top_5_accuracy are set to -1
     if the line does not contain accuracies.
   """
+  # print(logs)
   outputs = []
   for log in logs:
     if 'images/sec' in log and '+/-' in log:
@@ -205,7 +206,7 @@ def train_and_eval(testcase,
                    params,
                    check_output_values,
                    max_final_loss=10.,
-                   skip=None):
+                   skip='eval'):
   """Trains a model then evaluates it.
 
   This function should be used to verify training and evaluating
@@ -312,14 +313,14 @@ def create_black_and_white_images():
                                                                num_classes=1)
   return dir_path
 
-
+# Benchmark distributed test default configuration
 def get_params(train_dir_name):
   """Returns params that can be used to train."""
   params = benchmark_cnn.make_params(
-      batch_size=2,
+      batch_size=50,
       display_every=1,
       init_learning_rate=0.005,
-      model='trivial',
+      model='resnet50',
       num_batches=20,
       num_gpus=2,
       num_warmup_batches=5,
@@ -327,9 +328,11 @@ def get_params(train_dir_name):
       print_training_accuracy=True,
       train_dir=get_temp_dir(train_dir_name),
       variable_update='parameter_server',
+      local_parameter_device='CPU',
       weight_decay=0,
       distortions=True,
-      distort_color_in_yiq=False)
+      distort_color_in_yiq=False,
+      gpu_thread_mode='gpu_private')
   return benchmark_cnn.set_default_param_values_and_env_vars(params)
 
 

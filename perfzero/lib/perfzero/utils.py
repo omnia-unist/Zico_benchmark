@@ -266,6 +266,7 @@ def run_command(cmd, shell=True):
     Tuple of the command return value and the standard out in as a string.
   """
   logging.debug('Executing command: %s', cmd)
+  print('Executing command: %s', cmd)
   p = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                        stderr=subprocess.STDOUT, shell=shell)
 

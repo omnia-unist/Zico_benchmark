@@ -54,6 +54,10 @@ def _convert_params_to_flags_list(params):
   Returns:
     A list of flags.
   """
+  print([
+      "--%s=%s" % (k, str(v)) for k, v in six.iteritems(params._asdict())
+      if v != flags.param_specs[k].default_value
+  ])
   return [
       '--%s=%s' % (k, str(v)) for k, v in six.iteritems(params._asdict())
       if v != flags.param_specs[k].default_value
@@ -118,6 +122,7 @@ def _wait_for_processes(wait_processes, kill_processes):
     A list of strings, each which is a string of the stdout of a wait process.
   """
   wait_process_stdouts = [None] * len(wait_processes)
+  print(wait_process_stdouts)
   finished_wait_processes = set()
   while len(finished_wait_processes) < len(wait_processes):
     for i, wait_process in enumerate(wait_processes):
@@ -127,13 +132,21 @@ def _wait_for_processes(wait_processes, kill_processes):
       if ret_code is None:
         continue
       tf.logging.info('{} finished'.format(wait_process.name))
+      print('[Debugging] {} finished'.format(wait_process.name))
       wait_process.stdout.seek(0)
       wait_process_stdouts[i] = wait_process.stdout.read()
       tf.logging.info('stdout for {} (last {} chars): {}\n'.format(
           wait_process.name, MAX_OUTPUT_CHARS,
           wait_process_stdouts[i][-MAX_OUTPUT_CHARS:]))
+      print('[Debugging] stdout for {} (last {} chars): {}\n'.format(
+          wait_process.name, MAX_OUTPUT_CHARS,
+          wait_process_stdouts[i][-MAX_OUTPUT_CHARS:])
+      )
       wait_process.stderr.seek(0)
       tf.logging.info('stderr for {} (last {} chars): {}\n'.format(
+          wait_process.name, MAX_OUTPUT_CHARS,
+          wait_process.stderr.read()[-MAX_OUTPUT_CHARS:]))
+      print('[Debugging] stderr for {} (last {} chars): {}\n'.format(
           wait_process.name, MAX_OUTPUT_CHARS,
           wait_process.stderr.read()[-MAX_OUTPUT_CHARS:]))
       assert ret_code == 0, 'Process failed with return code %d' % ret_code
@@ -193,8 +206,11 @@ def _spawn_benchmark_processes(output_dir_path, num_workers, num_ps,
 
   args = platforms_util.get_command_to_run_python_module(
       'benchmark_cnn_distributed_test_runner')
+  print("[Debugging]",args)
   args += _convert_params_to_flags_list(params)
+  print("[Debugging]",args)
   if run_distributed:
+    print("[Debugging] Run Distributed Path")
     worker_ports = [portpicker.pick_unused_port() for _ in range(num_workers)]
     ps_ports = [portpicker.pick_unused_port() for _ in range(num_ps)]
     controller_ports = [portpicker.pick_unused_port()
@@ -203,7 +219,7 @@ def _spawn_benchmark_processes(output_dir_path, num_workers, num_ps,
     # runtime, etc.
     gpu_memory_frac = 0.7 / num_workers
     args += [
-        '--gpu_memory_frac_for_testing=%f' % gpu_memory_frac,
+        # '--gpu_memory_frac_for_testing=%f' % gpu_memory_frac,
         '--worker_hosts=' + ','.join('localhost:%d' % p for p in worker_ports)
     ]
     if num_ps > 0:
@@ -225,9 +241,11 @@ def _spawn_benchmark_processes(output_dir_path, num_workers, num_ps,
       job_name = 'worker' if run_distributed else ''
       process = _create_task_process(job_name, i, args, env, output_dir)
       worker_processes.append(process)
+      #print(worker_processes)
     # Don't let ps or controller processes use the gpu.
     env['CUDA_VISIBLE_DEVICES'] = ''
-
+    #print(num_ps)
+    #print(num_controllers)
     for i in range(num_ps):
       process = _create_task_process('ps', i, args, env, output_dir)
       ps_processes.append(process)
@@ -489,5 +507,4 @@ class DistributedVariableUpdateTest(tf.test.TestCase):
 
 
 if __name__ == '__main__':
-  tf.disable_v2_behavior()
   tf.test.main()

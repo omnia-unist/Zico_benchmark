@@ -170,12 +170,12 @@ flags.DEFINE_boolean('print_training_accuracy', False,
 flags.DEFINE_integer('batch_size', 0, 'batch size per compute device')
 # Add-on flags for supporting the colocation mode
 flags.DEFINE_integer('batch_size2', 0, '[ZICO FLAG] batch size per compute device for colocation mode')
-flags.DEFINE_integer('gpu_id', 0, '[ZICO FLAG] gpu_id for model')
-flags.DEFINE_integer('gpu_id2', 0, '[ZICO FLAG] gpu_id for model2')
-flags.DEFINE_string('run_mode', "Solo",
-                      'gangmuk: 0 is first model only.\
-                        1 is second model only. \
-                        2 is first and second model using threding _modified_benchmark_train')
+# flags.DEFINE_integer('gpu_id', 0, '[ZICO FLAG] gpu_id for model')
+# flags.DEFINE_integer('gpu_id2', 0, '[ZICO FLAG] gpu_id for model2')
+flags.DEFINE_string('run_mode', "SOLO",
+                    'gangmuk: 0 is first model only.\
+                              1 is second model only. \
+                              2 is first and second model using threding _modified_benchmark_train')
 
 flags.DEFINE_integer('eval_batch_size', 0, 'eval batch size per compute device')
 flags.DEFINE_integer('batch_group_size', 1,
@@ -738,8 +738,7 @@ flags.DEFINE_boolean('activate_global_pool', False,
                      '[ZICO FLAG] ')	
 # Gangmuk: New Param 9	
 flags.DEFINE_boolean('global_pool_release_ar', False,	
-                     '[ZICO FLAG] ')	
-                     	
+                     '[ZICO FLAG] ')	     	
 # Gangmuk: New Param 10	
 flags.DEFINE_boolean('global_pool_release_all', False,	
                      '[ZICO FLAG] ')	
@@ -1548,14 +1547,14 @@ class BenchmarkCNN(object):
     else:
       self.batch_size2 = None
     
-    if self.params.gpu_id >= 0:
-      print("params.gpu_id: {}".format(self.params.gpu_id))
-      self.model.set_gpu_id(self.params.gpu_id)
+    # if self.params.gpu_id >= 0:
+    #   print("params.gpu_id: {}".format(self.params.gpu_id))
+    #   self.model.set_gpu_id(self.params.gpu_id)
     
-    if self.model2 is not None:
-      if self.params.gpu_id2 >= 0:
-        print("params.gpu_id2: {}".format(self.params.gpu_id2))
-        self.model2.set_gpu_id(self.params.gpu_id2)
+    # if self.model2 is not None:
+    #   if self.params.gpu_id2 >= 0:
+    #     print("params.gpu_id2: {}".format(self.params.gpu_id2))
+    #     self.model2.set_gpu_id(self.params.gpu_id2)
 
     self.batch_size = self.model.get_batch_size() * self.num_gpus
     if self.mode in (constants.BenchmarkMode.TRAIN,
@@ -1563,6 +1562,7 @@ class BenchmarkCNN(object):
       self.train_batch_size = self.batch_size
       # Add-ons for supporting the colocation mode
       if self.batch_size2 is not None:
+        self.batch_size2 = self.model2.get_batch_size() * self.num_gpus
         self.train_batch_size2 = self.batch_size2
     
     else:
@@ -1613,6 +1613,7 @@ class BenchmarkCNN(object):
 
       worker_prefix = '/job:worker/replica:0/task:%s' % self.task_index
       if use_ps_server:
+        log_fn("Parameter Server Path")
         self.param_server_device = tf.train.replica_device_setter(
             worker_device=worker_prefix + '/cpu:0',
             cluster=self.cluster_manager.get_cluster_spec())
@@ -2041,9 +2042,7 @@ class BenchmarkCNN(object):
         return
       elif self.params.job_name and self.params.job_name != 'controller':
         raise ValueError('unrecognized job name: %s' % self.params.job_name)
-    print("[ZICO] Running _log_benchmark_run Checkpoints")
     self._log_benchmark_run()
-    print("[ZICO] Runned _log_benchmark_run Checkpoints")
     if self._doing_eval:
       with tf.Graph().as_default():
         # TODO(laigd): freeze the graph in eval mode.
@@ -2259,8 +2258,7 @@ class BenchmarkCNN(object):
 
     graph = tf.Graph()
     with graph.as_default():
-      build_result = self._build_graph()
-      
+      build_result = self._build_graph()   
       if self.mode == constants.BenchmarkMode.TRAIN_AND_EVAL:
         prinf("[ZICO] self.mode == constants.BenchmarkMode.TRAIN_AND_EVAL")
         with self.variable_mgr.reuse_variables():
@@ -2296,7 +2294,6 @@ class BenchmarkCNN(object):
             eval_build_results = self._build_eval_graph(ns)	
       else:	
         eval_build_results = None	
-    print(self._preprocess_graph(graph, build_result))
     (graph, result_to_benchmark) = self._preprocess_graph(graph, build_result)	
     print("[ZICO] right before _benchmark_graph call which_model={}".format(which_model))	
     with graph.as_default():	
@@ -2333,7 +2330,7 @@ class BenchmarkCNN(object):
         not self.params.cross_replica_sync):
       execution_barrier = self.add_sync_queues_and_barrier(
           'execution_barrier_', [])
-
+    log_fn(execution_barrier)
     global_step = tf.train.get_global_step()
     with tf.device(self.global_step_device), tf.name_scope('inc_global_step'):
       with tf.control_dependencies([main_fetch_group]):
@@ -2402,8 +2399,10 @@ class BenchmarkCNN(object):
     fetches_list = nest.flatten(list(fetches.values()))
     main_fetch_group = tf.group(*fetches_list, name='main_fetch_group')
     execution_barrier = None
-    if (not self.single_session and self.job_name and not self.params.cross_replica_sync):
-      execution_barrier = self.add_sync_queues_and_barrier('execution_barriers_', [])
+    if (not self.single_session and self.job_name and 
+        not self.params.cross_replica_sync):
+      execution_barrier = self.add_sync_queues_and_barrier(
+          'execution_barriers_', [])
     
     global_step = tf.train.get_global_step()
     with tf.device(self.global_step_device), tf.name_scope('inc_global_step'):
@@ -3110,7 +3109,7 @@ class BenchmarkCNN(object):
     else:
       mode_string = 'training'
 
-    log_fn('Generating {} model'.format(mode_string))
+    log_fn('[Baseline Mode] Generating {} model'.format(mode_string))
     losses = []
     device_grads = []
     all_logits = []
@@ -3199,6 +3198,7 @@ class BenchmarkCNN(object):
     fetches = self._build_fetches(global_step, all_logits, losses, device_grads,
                                   enqueue_ops, update_ops, all_accuracy_ops,
                                   phase_train)
+    print("Basic Build Model Path")
     return (input_producer_op, enqueue_ops, fetches)
 
 
@@ -3238,7 +3238,7 @@ class BenchmarkCNN(object):
     else:
       mode_string = 'training'
 
-    log_fn('[ZICO] Generating {} model'.format(mode_string))
+    log_fn('[ZICO Mode] Generating {} model'.format(mode_string))
     losses = []
     device_grads = []
     all_logits = []
@@ -3329,7 +3329,7 @@ class BenchmarkCNN(object):
     fetches = self._build_fetches(global_step, all_logits, losses, device_grads,
                                   enqueue_ops, update_ops, all_accuracy_ops,
                                   phase_train)
-    print((input_producer_op, enqueue_ops, fetches))
+    print("ZICO Modified Build Model Path\n")
     return (input_producer_op, enqueue_ops, fetches)
 
   def _build_fetches(self, global_step, all_logits, losses, device_grads,
@@ -4156,6 +4156,7 @@ def set_default_param_values_and_env_vars(params):
     # memory copies.
     per_gpu_thread_count = params.per_gpu_thread_count or 2
     total_gpu_thread_count = per_gpu_thread_count * params.num_gpus
+    print(str(per_gpu_thread_count))
 
     if params.gpu_thread_mode == 'gpu_private':
       os.environ['TF_GPU_THREAD_COUNT'] = str(per_gpu_thread_count)

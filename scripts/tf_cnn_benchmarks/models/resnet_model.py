@@ -290,13 +290,13 @@ class ResnetModel(model_lib.CNNModel):
     if params and params.resnet_base_lr:
       base_lr = params.resnet_base_lr
 
-    # ZICO-tuned
-    if params.gpu_id < 0:
-      print("[ZICO ERROR] gpu id: {}. It is less than 0. (resnet_model.py)".format(params.gpu_id))
-      exit(-1)
-    else:
-      self.gpu_id = params.gpu_id
-      print("[ZICO] gpu_id: {}.  (resent_model.py)".format(self.gpu_id))
+    # # ZICO-tuned
+    # if params.gpu_id < 0:
+    #   print("[ZICO ERROR] gpu id: {}. It is less than 0. (resnet_model.py)".format(params.gpu_id))
+    #   exit(-1)
+    # else:
+    #   self.gpu_id = params.gpu_id
+    #   print("[ZICO] gpu_id: {}.  (resent_model.py)".format(self.gpu_id))
 
     super(ResnetModel, self).__init__(model, 224, batch_size, base_lr,
                                       layer_counts, params=params)
@@ -311,9 +311,10 @@ class ResnetModel(model_lib.CNNModel):
   
       # Based on model version. (resnet50, resnet50_v2)
     if self.version == 'v1':
-      self.gpu_id = 0
+      # self.gpu_id = 0
+      pass
     else:
-      self.gpu_id = 1
+      # self.gpu_id = 1
       pdb.set_trace()
   
   

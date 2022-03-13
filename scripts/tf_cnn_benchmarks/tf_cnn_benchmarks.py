@@ -55,20 +55,6 @@ def main(positional_arguments):
     raise ValueError('Received unknown positional arguments: %s'
                      % positional_arguments[1:])
 
-  # gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gpu_max_mem, allow_growth=True)
-  # gpu_options = tf.GPUOptions(allow_growth=True)
-  # sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
-
-  # gpus = tf.config.experimental.list_physical_devices('GPU')
-  # if gpus:
-  #     try:
-  #         # Currently, memory growth needs to be the same across GPUs
-  #         for gpu in gpus:
-  #             tf.config.experimental.set_memory_growth(gpu, True)
-  #     except RuntimeError as e:
-  #         # Memory growth must be set before GPUs have been initialized
-  #         print(e)
-
   params = benchmark_cnn.make_params_from_flags()
   with mlperf.mlperf_logger(absl_flags.FLAGS.ml_perf_compliance_logging,
                             params.model):
@@ -93,23 +79,11 @@ def main_wrapper(positional_arguments):
     bench = benchmark_cnn.BenchmarkCNN(params)
 
     tfversion = cnn_util.tensorflow_version_tuple()
-    log_fn('TensorflowL %i.%i' % (tfversion[0], tfversion[1]))
+    log_fn('Tensorflow %i.%i' % (tfversion[0], tfversion[1]))
 
     bench.print_info()
     bench.run()
 
 if __name__ == '__main__':
-  # tf.disable_v2_behavior()
-  # gpu_options = tf.GPUOptions(allow_growth=True)
-  # sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
-  # gpus = tf.experimental.list_physical_devices('GPU')
-  # if gpus:
-  #     try:
-  #         # Currently, memory growth needs to be the same across GPUs
-  #         for gpu in gpus:
-  #             tf.experimental.set_memory_growth(gpu, True)
-  #     except RuntimeError as e:
-  #         # Memory growth must be set before GPUs have been initialized
-  #         print(e)
   print("App running")
   app.run(main)  # Raises error on invalid flags, unlike tf.app.run()
