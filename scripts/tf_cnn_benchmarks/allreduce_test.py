@@ -22,7 +22,7 @@ from __future__ import print_function
 import collections as pycoll
 
 import numpy as np
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 from tensorflow.python.framework import ops
 from tensorflow.python.framework import test_util
 from tensorflow.python.ops import variables

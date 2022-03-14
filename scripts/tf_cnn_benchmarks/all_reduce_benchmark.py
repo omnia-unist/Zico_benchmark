@@ -34,7 +34,7 @@ import time
 
 from absl import app
 from absl import flags as absl_flags
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 
 from tensorflow.python.ops import control_flow_ops
 import benchmark_cnn

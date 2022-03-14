@@ -24,7 +24,7 @@ from __future__ import print_function
 
 from absl import app
 from absl import flags as absl_flags
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 
 import benchmark_cnn
 import cnn_util

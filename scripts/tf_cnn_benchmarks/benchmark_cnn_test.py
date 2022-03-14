@@ -25,7 +25,7 @@ import unittest
 
 import mock
 import numpy as np
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 from google.protobuf import text_format
 from tensorflow.core.framework import step_stats_pb2
 from tensorflow.core.profiler import tfprof_log_pb2

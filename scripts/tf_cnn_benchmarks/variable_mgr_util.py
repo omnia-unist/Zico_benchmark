@@ -22,7 +22,7 @@ import collections as pycoll
 import operator
 
 import numpy as np
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 
 # pylint: disable=g-direct-tensorflow-import
 from tensorflow.python.framework import ops
