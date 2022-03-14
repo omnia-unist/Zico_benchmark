@@ -80,19 +80,19 @@ elif [ ${run_mode} == MPS ]; then
 elif [ ${run_mode} == ZICO ]; then
   # if [ ${num_jobs} == 2jobs ]; then
   if [ ${num_jobs} == 2 ]; then
-    # CUDA_VISIBLE_DEVICES=${gpu_id} python3 tf_cnn_benchmarks.py --num_gpus=${num_gpus} --num_batches=${num_batches} \
-    #                           --use_unified_memory=${use_unified_memory} --allow_growth=${allow_growth} \
-    #                           --model=${model} --batch_size=${batch_size} \
-    #                           --model2=${model} --batch_size2=${batch_size} \
-    #                           --data_name=${data_name} --data_name2=${data_name} \
-    #                           --run_mode=${run_mode} &> ${output_filename}
-    CUDA_VISIBLE_DEVICES=0,1 python3 tf_cnn_benchmarks.py --num_gpus=${num_gpus} --num_batches=${num_batches} \
+    CUDA_VISIBLE_DEVICES=${gpu_id} python3 tf_cnn_benchmarks.py --num_gpus=${num_gpus} --num_batches=${num_batches} \
                               --use_unified_memory=${use_unified_memory} --allow_growth=${allow_growth} \
-                              --data_format=NCHW --variable_update=replicated \
                               --model=${model} --batch_size=${batch_size} \
                               --model2=${model} --batch_size2=${batch_size} \
                               --data_name=${data_name} --data_name2=${data_name} \
-                              --run_mode=${run_mode} &> ${output_filename}  
+                              --run_mode=${run_mode} &> ${output_filename}
+    # CUDA_VISIBLE_DEVICES=0,1 python3 tf_cnn_benchmarks.py --num_gpus=${num_gpus} --num_batches=${num_batches} \
+    #                           --use_unified_memory=${use_unified_memory} --allow_growth=${allow_growth} \
+    #                           --data_format=NCHW --variable_update=replicated \
+    #                           --model=${model} --batch_size=${batch_size} \
+    #                           --model2=${model} --batch_size2=${batch_size} \
+    #                           --data_name=${data_name} --data_name2=${data_name} \
+    #                           --run_mode=${run_mode} &> ${output_filename}  
   # elif [ ${num_jobs} == 4jobs ]; then
   # elif [ ${num_jobs} == 4 ]; then
   #   CUDA_VISIBLE_DEVICES=${gpu_id} python3 tf_cnn_benchmarks_four_jobs.py --num_gpus=${num_gpus} --num_batches=${num_batches} \

@@ -2567,11 +2567,11 @@ class BenchmarkCNN(object):
 
     try:
       new_config = create_config_proto(self.params)
-      if which_model is not None:
-        new_config.gangmuk_job_id = which_model
-        print("[ZICO] new_config.gangmuk_job_id = {}".format(which_model))
-      else:
-        new_config.gangmuk_job_id = 0
+      # if which_model is not None:
+      #   new_config.gangmuk_job_id = which_model
+      #   print("[ZICO] new_config.gangmuk_job_id = {}".format(which_model))
+      # else:
+      #   # new_config.gangmuk_job_id = 0
 
       with sv.managed_session(
           master=target, 
