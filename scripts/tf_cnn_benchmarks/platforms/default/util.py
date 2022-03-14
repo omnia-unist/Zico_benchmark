@@ -24,7 +24,6 @@ import sys
 import tempfile
 
 import cnn_util
-from models import model_config
 
 
 _ROOT_PROJECT_DIR = os.path.dirname(cnn_util.__file__)

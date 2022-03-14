@@ -236,6 +236,8 @@ class VariableMgrLocalFetchFromPS(VariableMgr):
 
   def get_devices(self):
     raw_devices = self.benchmark_cnn.raw_devices
+    print("[Debugging] raw_devices: ", raw_devices)
+    print("[Debugging] Type of raw_devices: ", type(raw_devices))
     if self.benchmark_cnn.local_parameter_device_flag == 'gpu':
       return [
           variable_mgr_util.ParamServerDeviceSetter(d, raw_devices)
@@ -669,8 +671,11 @@ class VariableMgrDistributedFetchFromPS(VariableMgr):
     return agg_grads
 
   def get_devices(self):
-    ps_strategy = variable_mgr_util.GreedyLoadBalancingStrategy(
-        self.benchmark_cnn.num_ps, variable_mgr_util.byte_size_load_fn)
+    # ps_strategy = variable_mgr_util.GreedyLoadBalancingStrategy(
+    #     self.benchmark_cnn.num_ps, variable_mgr_util.byte_size_load_fn)
+    # [TODO] ZICO Benchmark version use tf.contrib.training not variable_mgr_util. Need to know reason.
+    ps_strategy = tf.contrib.training.GreedyLoadBalancingStrategy(
+        self.benchmark_cnn.num_ps, tf.contrib.training.byte_size_load_fn)
     return [
         tf.train.replica_device_setter(
             worker_device=d,

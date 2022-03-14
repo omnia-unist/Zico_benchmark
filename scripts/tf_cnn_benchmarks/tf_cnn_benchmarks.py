@@ -69,5 +69,5 @@ def main(positional_arguments):
 
 
 if __name__ == '__main__':
-  tf.disable_v2_behavior()
+  print("App running")
   app.run(main)  # Raises error on invalid flags, unlike tf.app.run()
