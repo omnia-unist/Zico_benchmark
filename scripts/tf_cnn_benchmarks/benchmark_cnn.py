@@ -1330,7 +1330,7 @@ class BenchmarkCNN(object):
       self.model2 = model_config.get_model_config(
           self.params.model2, self.dataset2, self.params
       )
-
+      
     else:
       self.model2 = None
 

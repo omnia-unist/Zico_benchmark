@@ -704,7 +704,7 @@ class TfCnnBenchmarksTest(tf.test.TestCase):
     params = params._replace(train_dir=new_train_dir, eval=True)
     self._run_benchmark_cnn_with_black_and_white_images(params)
 
-  @mock.patch('tensorflow.compat.v1.train.Saver')
+  @mock.patch('tensorflow.train.Saver')
   @mock.patch('benchmark_cnn._get_checkpoint_to_load')
   def testLoadCheckpoint(self, mock_checkpoint_to_load, mock_saver):
     """Tests load checkpoint with full path to checkpoint."""
@@ -728,7 +728,7 @@ class TfCnnBenchmarksTest(tf.test.TestCase):
     self.assertRaises(benchmark_cnn.CheckpointNotFoundException,
                       benchmark_cnn._get_checkpoint_to_load, ckpt_path)
 
-  @mock.patch('tensorflow.compat.v1.train.get_checkpoint_state')
+  @mock.patch('tensorflow.train.get_checkpoint_state')
   def testGetCheckpointToLoad(self, mock_checkpoint_state):
     """Tests passing path to checkpoint folder."""
     expected_checkpoint = '/path/to/checkpoints/model.ckpt-1243'

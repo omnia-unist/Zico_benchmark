@@ -26,6 +26,7 @@ import tensorflow as tf
 
 # pylint: disable=g-direct-tensorflow-import
 import cnn_util
+from tensorflow.contrib.data.python.ops import threadpool
 from tensorflow.python.data.ops import multi_device_iterator_ops
 from tensorflow.python.framework import function
 from tensorflow.python.layers import utils
@@ -802,7 +803,7 @@ class ImagenetPreprocessor(RecordInputImagePreprocessor):
   def preprocess(self, image_buffer, bbox, batch_position):
     # pylint: disable=g-import-not-at-top
     try:
-      from official.r1.resnet.imagenet_preprocessing import preprocess_image
+      from official.resnet.imagenet_preprocessing import preprocess_image
     except ImportError:
       tf.logging.fatal('Please include tensorflow/models to the PYTHONPATH.')
       raise
@@ -1095,9 +1096,15 @@ class COCOPreprocessor(BaseImagePreprocessor):
             drop_remainder=train))
     ds = ds.prefetch(buffer_size=num_splits)
     if num_threads:
-      options = tf.data.Options()
-      options.experimental_threading.private_threadpool_size = num_threads
-      ds = ds.with_options(options)
+      # options = tf.data.Options()
+      # options.experimental_threading.private_threadpool_size = num_threads
+      # ds = ds.with_options(options)
+      ds = threadpool.override_threadpool(
+        ds,
+        threadpool.PrivateThreadPool(
+          num_threads, display_name='input_pipeline_thread_pool'
+        )
+      )
     return ds
 
   def supports_datasets(self):
@@ -1256,9 +1263,15 @@ class LibrispeechPreprocessor(InputPreprocessor):
         drop_remainder=True)
     ds = ds.prefetch(buffer_size=num_splits)
     if num_threads:
-      options = tf.data.Options()
-      options.experimental_threading.private_threadpool_size = num_threads
-      ds = ds.with_options(options)
+      # options = tf.data.Options()
+      # options.experimental_threading.private_threadpool_size = num_threads
+      # ds = ds.with_options(options)
+      ds = threadpool.override_threadpool(
+        ds,
+        threadpool.PrivateThreadPool(
+          num_threads, display_name='input_pipeline_thread_pool'
+        )
+      )
     return ds
 
   def minibatch(self, dataset, subset, params, shift_ratio=-1):

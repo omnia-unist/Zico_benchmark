@@ -38,6 +38,7 @@ import abc
 import six
 import tensorflow as tf
 
+from tensorflow.contrib.compiler import xla
 from tensorflow.python.ops import data_flow_ops
 import allreduce
 import constants
@@ -158,7 +159,7 @@ class BatchAllReduceAlgorithm(object):
 
       with tf.device(device_tensors[0].device):
         if xla_compile:
-          packed_tensors = tf.xla.experimental.compile(
+          packed_tensors = xla.compile(
               pack_single_device_tensors)
           # When xla_compile=True, intermediate tensors in packing process are
           # not materialized. Thus, we defer tensors after packing process is
@@ -189,7 +190,7 @@ class BatchAllReduceAlgorithm(object):
 
       with tf.device(device_tensors[0].device):
         if xla_compile:
-          unpacked_device_tensor = tf.xla.experimental.compile(
+          unpacked_device_tensor = xla.compile(
               unpack_single_device_tensors)
         else:
           unpacked_device_tensor = unpack_single_device_tensors()

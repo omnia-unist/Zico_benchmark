@@ -205,7 +205,7 @@ def train_and_eval(testcase,
                    params,
                    check_output_values,
                    max_final_loss=10.,
-                   skip="eval_and_train_from_checkpoint"):
+                   skip='eval_and_train_from_checkpoint'):
   """Trains a model then evaluates it.
 
   This function should be used to verify training and evaluating

@@ -76,7 +76,6 @@ def get_ssd_backboard_data_dir():
 
 def _initialize(params, config_proto):
   del params, config_proto
-  model_config.register_tf1_models()
 
 
 _is_initalized = False
