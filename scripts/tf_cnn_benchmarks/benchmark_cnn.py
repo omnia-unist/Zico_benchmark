@@ -37,7 +37,7 @@ import numpy as np
 
 import six
 from six.moves import xrange  # pylint: disable=redefined-builtin
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 
 # pylint: disable=g-direct-tensorflow-import
 import cnn_util
@@ -61,6 +61,10 @@ from tensorflow.python.ops import data_flow_ops
 from tensorflow.python.platform import gfile
 from tensorflow.python.util import nest
 
+import os
+import time
+
+os.environ['TF_CPP_MIN_VLOG_LEVEL'] = '2'
 
 _DEFAULT_NUM_BATCHES = 100
 
@@ -112,6 +116,11 @@ InputProcessingInfo = namedtuple(
 flags.DEFINE_string('model', 'trivial',
                     'Name of the model to run, the list of supported models '
                     'are defined in models/model.py')
+
+flags.DEFINE_string('model2', 'trivial',
+                    'Name of the model to run in colocation mode, the list of supported models '
+                    'are defined in models/model.py')
+
 # The code will first check if it's running under benchmarking mode
 # or evaluation mode, depending on 'eval':
 # Under the evaluation mode, this script will read a saved model,
@@ -156,6 +165,10 @@ flags.DEFINE_boolean('print_training_accuracy', False,
                      'whether to calculate and print training accuracy during '
                      'training')
 flags.DEFINE_integer('batch_size', 0, 'batch size per compute device')
+flags.DEFINE_integer('batch_size2', 0, 'batch size per compute device for second model')
+flags.DEFINE_string('run_mode', "SOLO", 
+                    'SOLO is single model mode - default \
+                     ZICO is colocating two models mode')
 flags.DEFINE_integer('eval_batch_size', 0, 'eval batch size per compute device')
 flags.DEFINE_integer('batch_group_size', 1,
                      'number of groups of batches processed in the image '
@@ -201,6 +214,13 @@ flags.DEFINE_string('data_dir', None,
                     'protobufs). If not specified, synthetic data will be '
                     'used.')
 flags.DEFINE_string('data_name', None,
+                    'Name of dataset: imagenet or cifar10. If not specified, '
+                    'it is automatically guessed based on data_dir.')
+flags.DEFINE_string('data_dir2', None,
+                    'Path to dataset in TFRecord format (aka Example '
+                    'protobufs). If not specified, synthetic data will be '
+                    'used.')
+flags.DEFINE_string('data_name2', None,
                     'Name of dataset: imagenet or cifar10. If not specified, '
                     'it is automatically guessed based on data_dir.')
 flags.DEFINE_string('resize_method', 'bilinear',
@@ -1303,6 +1323,17 @@ class BenchmarkCNN(object):
                                                       self.params.data_name)
     self.model = model or model_config.get_model_config(
         self.params.model, self.dataset, self.params)
+    
+    if self.params.run_mode == "ZICO":
+      self.dataset2 = dataset or datasets.create_dataset(self.params.data_dir2,
+                                                          self.params.data_name2)
+      self.model2 = model_config.get_model_config(
+          self.params.model2, self.dataset2, self.params
+      )
+
+    else:
+      self.model2 = None
+
     self.trace_filename = self.params.trace_file
     self.rewriter_config = self.params.rewriter_config
     autotune_threshold = self.params.autotune_threshold if (
@@ -1439,9 +1470,20 @@ class BenchmarkCNN(object):
     if self.params.batch_size > 0:
       self.model.set_batch_size(self.params.batch_size)
     self.batch_size = self.model.get_batch_size() * self.num_gpus
+    
+    if self.model2 is not None and self.params.batch_size2 > 0:
+      self.model2.set_batch_size(self.params.batch_size2)
+      self.batch_size2 = self.params.batch_size2
+    else:
+      self.batch_size2 = None
+    
     if self.mode in (constants.BenchmarkMode.TRAIN,
                      constants.BenchmarkMode.TRAIN_AND_EVAL):
       self.train_batch_size = self.batch_size
+      if self.batch_size2 is not None:
+        self.batch_size2 = self.model2.get_batch_size() * self.num_gpus
+        self.train_batch_size2 = self.batch_size2
+
     else:
       self.train_batch_size = None
     if self.mode in (constants.BenchmarkMode.EVAL,
@@ -1652,6 +1694,7 @@ class BenchmarkCNN(object):
     self.devices = self.variable_mgr.get_devices()
     if self.job_name:
       if use_ps_server:
+        log_fn("[Debugging] Parameter Server Path")
         self.global_step_device = self.param_server_device
       elif self.params.variable_update == 'collective_all_reduce':
         self.global_step_device = self.cpu_device
@@ -1727,7 +1770,7 @@ class BenchmarkCNN(object):
     model_benchmark_logger = None
     if self.params.benchmark_log_dir is not None:
       try:
-        from official.r1.utils.logs import logger as models_logger  # pylint: disable=g-import-not-at-top
+        from official.utils.logs import logger as models_logger  # pylint: disable=g-import-not-at-top
       except ImportError:
         tf.logging.fatal('Please include tensorflow/models to the PYTHONPATH '
                          'in order to use BenchmarkLogger. Configured '
@@ -1796,6 +1839,13 @@ class BenchmarkCNN(object):
     if self.params.variable_update == 'horovod' and self.params.horovod_device:
       log_fn('Horovod on:  %s' % self.params.horovod_device)
     log_fn('==========')
+    
+    if self.model2 is not None:
+      log_fn("[Colocation Mode] Model 2 for colocation mode")
+      log_fn("[Colocation Mode] Model 2:       %s' % self.model.get_model_name()")
+      log_fn('[Colocation Mode] Batch size 2:  %s global' % (self.batch_size * self.num_workers))
+      log_fn('                                 %s per device' % (self.batch_size //
+                                                                len(self.raw_devices)))
 
   def _get_params_info(self):
     """Get the common parameters info for the benchmark run.
@@ -1860,7 +1910,7 @@ class BenchmarkCNN(object):
        ValueError: unrecognized job name.
     """
     if self.params.job_name == 'ps':
-      log_fn('Running parameter server %s' % self.task_index)
+      log_fn('[Debugging] Running parameter server %s' % self.task_index)
       self.cluster_manager.join_server()
       return {}
 
@@ -1880,7 +1930,14 @@ class BenchmarkCNN(object):
         # TODO(laigd): freeze the graph in eval mode.
         return self._run_eval()
     else:
-      return self._benchmark_train()
+      if self.params.run_mode == "SOLO":
+        return self._benchmark_train()
+      elif self.params.run_mode == "ZICO":
+        print("[Debugging] ZICO implementation path. Not testing.")
+        exit(-1)
+      else:
+        print("[Error] benchmark_cnn.py, Not supported RUN_MODE: {}\n".format(self.params.run_mode))
+        exit(-1)
 
   def _run_eval(self):
     """Evaluate a model every self.params.eval_interval_secs.
@@ -2164,7 +2221,7 @@ class BenchmarkCNN(object):
         local_var_init_op_group=local_var_init_op_group,
         summary_op=summary_op)
 
-  def _benchmark_graph(self, graph_info, eval_graph_info):
+  def _benchmark_graph(self, graph_info, eval_graph_info, model_idx=None):
     """Benchmark the training graph.
 
     Args:
@@ -2280,9 +2337,16 @@ class BenchmarkCNN(object):
         self.params.train_dir or
         self.dataset.queue_runner_required())
     target = self.cluster_manager.get_target() if self.cluster_manager else ''
+    
+    new_config = create_config_proto(self.params)
+    # if model_idx is not None:
+    #   new_config.gangmuk_job_id = model_idx
+    # else:
+    #   new_config.ganamuk_job_id = 0
+
     with sv.managed_session(
         master=target,
-        config=create_config_proto(self.params),
+        config=new_config,
         start_standard_services=start_standard_services) as sess:
       # Anything that can potentially raise an OutOfRangeError with 'sess' MUST
       # be under this try block. The managed_session() context manager silently
@@ -2292,7 +2356,7 @@ class BenchmarkCNN(object):
       try:
         stats = self.benchmark_with_session(
             sess, sv, graph_info, eval_graph_info, bcast_global_variables_op,
-            is_chief, summary_writer, profiler)
+            is_chief, summary_writer, profiler, model_idx)
       except tf.errors.OutOfRangeError:
         raise RuntimeError(
             'Received OutOfRangeError. Wrapping in Runtime error to avoid '
@@ -2306,7 +2370,7 @@ class BenchmarkCNN(object):
 
   def benchmark_with_session(self, sess, supervisor, graph_info,
                              eval_graph_info, bcast_global_variables_op,
-                             is_chief, summary_writer, profiler):
+                             is_chief, summary_writer, profiler, model_idx=None):
     """Benchmarks the graph with the given session.
 
     Args:
@@ -2421,16 +2485,34 @@ class BenchmarkCNN(object):
         fetch_summary = None
       collective_graph_key = 7 if (
           self.params.variable_update == 'collective_all_reduce') else 0
+
+      # timestamp for colocation mode
+      colocation_ts = time.perf_counter()
+      
+      if model_idx == 1:
+        redefined_batch_size = self.batch_size2
+      else:
+        redefined_batch_size = self.batch_size
+      
       (summary_str, last_average_loss) = benchmark_one_step(
           sess, graph_info.fetches, local_step,
-          self.batch_size * (self.num_workers
-                             if self.single_session else 1), step_train_times,
+          redefined_batch_size * (self.num_workers
+                                  if self.single_session else 1), step_train_times,
           self.trace_filename, self.params.partitioned_graph_file_prefix,
           profiler, image_producer, self.params, fetch_summary,
           benchmark_logger=self.benchmark_logger,
           collective_graph_key=collective_graph_key,
           should_output_files=(self.params.variable_update != 'horovod' or
                                is_chief))
+      
+      if model_idx == 1:
+          log_fn("model 2: {0} pid: {1} real time images/sec: {2:.2f}".format(
+            self.model2.get_model_name(), os.getpid(), self.batch_size2/(time.perf_counter() - colocation_ts)
+          ))
+      else:
+          log_fn("model 1: {0} pid: {1} real time images/sec: {2:.2f}".format(
+            self.model.get_model_name(), os.getpid(), self.batch_size/(time.perf_counter() - colocation_ts)
+          ))
       if summary_str is not None and is_chief:
         supervisor.summary_computed(sess, summary_str)
       local_step += 1
@@ -2496,7 +2578,10 @@ class BenchmarkCNN(object):
     if self.mode != constants.BenchmarkMode.TRAIN_AND_EVAL:
       log_fn('-' * 64)
       # TODO(laigd): rename 'images' to maybe 'inputs'.
-      log_fn('total images/sec: %.2f' % images_per_sec)
+      if model_idx is not None:
+        log_fn('model {} total images/sec: {0:.2f}'.format(model_idx + 1, images_per_sec))
+      else:
+        log_fn('total images/sec: {0:.2f}'.format(images_per_sec))
       log_fn('-' * 64)
     else:
       log_fn('Done with training')
@@ -2629,7 +2714,7 @@ class BenchmarkCNN(object):
     if self.params.trt_mode:
       # Import here instead of at top, because this will crash if TensorRT is
       # not installed
-      from tensorflow.python.compiler.tensorrt import trt_convert  # pylint: disable=g-import-not-at-top
+      from tensorflow.contrib.tensorrt import trt  # pylint: disable=g-import-not-at-top
       # Avoid TF-TRT bridge from touching all variable initializer ops and their
       # dependencies, since they can directly be fetched by sess.run()s that
       # initialize the variables.
@@ -2640,7 +2725,7 @@ class BenchmarkCNN(object):
           variable_initializers, name_to_input_name)
       # pylint: enable=protected-access
 
-      graphdef = trt_convert.create_inference_graph(
+      graphdef = trt.create_inference_graph(
           graphdef,
           outputs=output_node_names + list(initializer_subgraph_ops),
           max_batch_size=self.model.get_batch_size(),

@@ -20,7 +20,7 @@ from __future__ import print_function
 
 from collections import namedtuple
 
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 
 import convnet_builder
 import mlperf

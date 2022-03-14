@@ -33,7 +33,7 @@ import unittest
 from absl import flags as absl_flags
 import portpicker
 import six
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 import flags
 import test_util
 from platforms import util as platforms_util
@@ -299,7 +299,7 @@ class TfCnnBenchmarksDistributedTest(tf.test.TestCase):
   def testParameterServer(self):
     test_name = 'testParameterServer'
     params = test_util.get_params(test_name)
-    self._test_distributed(test_name, 2, 2, params)
+    self._test_distributed(test_name, 1, 1, params)
 
   def testParameterServerStaged(self):
     test_name = 'testParameterServerStaged'
@@ -489,5 +489,5 @@ class DistributedVariableUpdateTest(tf.test.TestCase):
 
 
 if __name__ == '__main__':
-  tf.disable_v2_behavior()
+  # tf.disable_v2_behavior()
   tf.test.main()
