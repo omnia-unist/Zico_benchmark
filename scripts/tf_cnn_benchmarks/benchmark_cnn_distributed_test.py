@@ -203,7 +203,7 @@ def _spawn_benchmark_processes(output_dir_path, num_workers, num_ps,
     # runtime, etc.
     gpu_memory_frac = 0.7 / num_workers
     args += [
-        '--gpu_memory_frac_for_testing=%f' % gpu_memory_frac, # Memory Fraction will cause assertion errors. need to debug(22.03.14)
+        '--gpu_memory_frac_for_testing=%f' % gpu_memory_frac, # [TODO] Memory Fraction will cause assertion errors. need to debug(22.03.14)
         '--worker_hosts=' + ','.join('localhost:%d' % p for p in worker_ports)
     ]
     if num_ps > 0:
