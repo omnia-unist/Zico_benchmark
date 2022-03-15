@@ -28,12 +28,13 @@ import perfzero.benchmark_method_runner as benchmark_method_runner
 import perfzero.perfzero_config as perfzero_config
 import perfzero.tpu_runtime_utils as tpu_runtime_utils
 import perfzero.utils as utils
-
+import perfzero.perfzero_config as perfzero_config
+import perfzero.report_utils as report_utils
 
 class BenchmarkRunner(object):
   """Execute benchmark and report results."""
 
-  def __init__(self, config):
+  def __init__(self, config=None):
     self.config = config
     self.project_dir = os.path.abspath(
         os.path.dirname(os.path.dirname(__file__)))
