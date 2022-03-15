@@ -40,19 +40,19 @@ num_batches=50
 
 if [ ${run_mode} == SOLO ]; then
   run_mode=SOLO
-  CUDA_VISIBLE_DEVICES=0,1 python3 tf_cnn_benchmarks.py --num_gpus=${num_gpus} --batch_size=${batch_size} \
-                            --num_batches=${num_batches} --model=${model} \
-                            --variable_update=parameter_server --local_parameter_device=CPU \
-                            --use_unified_memory=${use_unified_memory} --allow_growth=${allow_growth} \
-                            --run_mode=${run_mode} \
-                            --eval=False \
-                            --data_name=${data_name} &> ${output_filename}
-  # CUDA_VISIBLE_DEVICES=${gpu_id} python3 tf_cnn_benchmarks.py --num_gpus=${num_gpus} --batch_size=${batch_size} \
+  # CUDA_VISIBLE_DEVICES=0,1 python3 tf_cnn_benchmarks.py --num_gpus=${num_gpus} --batch_size=${batch_size} \
   #                           --num_batches=${num_batches} --model=${model} \
+  #                           --variable_update=parameter_server --local_parameter_device=CPU \
   #                           --use_unified_memory=${use_unified_memory} --allow_growth=${allow_growth} \
-  #                           --run_mode=${run_mode} --data_format=NHWC \
+  #                           --run_mode=${run_mode} \
   #                           --eval=False \
   #                           --data_name=${data_name} &> ${output_filename}
+  CUDA_VISIBLE_DEVICES=${gpu_id} python3 tf_cnn_benchmarks.py --num_gpus=${num_gpus} --batch_size=${batch_size} \
+                            --num_batches=${num_batches} --model=${model} \
+                            --use_unified_memory=${use_unified_memory} --allow_growth=${allow_growth} \
+                            --run_mode=${run_mode} --data_format=NHWC \
+                            --eval=False \
+                            --data_name=${data_name} &> ${output_filename}
                             # --use_tf_layers=False \
 
                             # --xla=True \
