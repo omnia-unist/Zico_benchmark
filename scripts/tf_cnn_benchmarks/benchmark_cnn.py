@@ -170,8 +170,8 @@ flags.DEFINE_boolean('print_training_accuracy', False,
 flags.DEFINE_integer('batch_size', 0, 'batch size per compute device')
 # Add-on flags for supporting the colocation mode
 flags.DEFINE_integer('batch_size2', 0, '[ZICO FLAG] batch size per compute device for colocation mode')
-# flags.DEFINE_integer('gpu_id', 0, '[ZICO FLAG] gpu_id for model')
-# flags.DEFINE_integer('gpu_id2', 0, '[ZICO FLAG] gpu_id for model2')
+flags.DEFINE_integer('gpu_id', 0, '[ZICO FLAG] gpu_id for model')
+flags.DEFINE_integer('gpu_id2', 0, '[ZICO FLAG] gpu_id for model2')
 flags.DEFINE_string('run_mode', "SOLO",
                     'gangmuk: 0 is first model only.\
                               1 is second model only. \
@@ -1547,14 +1547,14 @@ class BenchmarkCNN(object):
     else:
       self.batch_size2 = None
     
-    # if self.params.gpu_id >= 0:
-    #   print("params.gpu_id: {}".format(self.params.gpu_id))
-    #   self.model.set_gpu_id(self.params.gpu_id)
+    if self.params.gpu_id >= 0:
+      print("params.gpu_id: {}".format(self.params.gpu_id))
+      self.model.set_gpu_id(self.params.gpu_id)
     
-    # if self.model2 is not None:
-    #   if self.params.gpu_id2 >= 0:
-    #     print("params.gpu_id2: {}".format(self.params.gpu_id2))
-    #     self.model2.set_gpu_id(self.params.gpu_id2)
+    if self.model2 is not None:
+      if self.params.gpu_id2 >= 0:
+        print("params.gpu_id2: {}".format(self.params.gpu_id2))
+        self.model2.set_gpu_id(self.params.gpu_id2)
 
     self.batch_size = self.model.get_batch_size() * self.num_gpus
     if self.mode in (constants.BenchmarkMode.TRAIN,
@@ -2567,11 +2567,11 @@ class BenchmarkCNN(object):
 
     try:
       new_config = create_config_proto(self.params)
-      # if which_model is not None:
-      #   new_config.gangmuk_job_id = which_model
-      #   print("[ZICO] new_config.gangmuk_job_id = {}".format(which_model))
-      # else:
-      #   # new_config.gangmuk_job_id = 0
+      if which_model is not None:
+        new_config.gangmuk_job_id = which_model
+        print("[ZICO] new_config.gangmuk_job_id = {}".format(which_model))
+      else:
+        new_config.gangmuk_job_id = 0
 
       with sv.managed_session(
           master=target, 
@@ -4156,7 +4156,6 @@ def set_default_param_values_and_env_vars(params):
     # memory copies.
     per_gpu_thread_count = params.per_gpu_thread_count or 2
     total_gpu_thread_count = per_gpu_thread_count * params.num_gpus
-    print(str(per_gpu_thread_count))
 
     if params.gpu_thread_mode == 'gpu_private':
       os.environ['TF_GPU_THREAD_COUNT'] = str(per_gpu_thread_count)

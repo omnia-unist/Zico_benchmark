@@ -7,7 +7,7 @@ run_mode=$4
 num_jobs=$5
 output_filename=$6
 
-num_gpus=2
+num_gpus=1
 num_warmup_batches=0
 use_unified_memory=True
 allow_growth=True
@@ -71,7 +71,7 @@ if [ ${run_mode} == SOLO ]; then
                             # --tfprof_file=True \
 elif [ ${run_mode} == MPS ]; then
   run_mode=SOLO
-  CUDA_VISIBLE_DEVICES=0,1 python3 tf_cnn_benchmarks.py --num_gpus=${num_gpus} --batch_size=${batch_size} \
+  CUDA_VISIBLE_DEVICES=${gpu_id} python3 tf_cnn_benchmarks.py --num_gpus=${num_gpus} --batch_size=${batch_size} \
                             --num_batches=${num_batches} --model=${model} \
                             -- variable_update=parameter_server --local_parameter_device=CPU
                             --use_unified_memory=${use_unified_memory} --allow_growth=${allow_growth} \
