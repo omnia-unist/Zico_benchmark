@@ -706,8 +706,6 @@ flags.DEFINE_string('benchmark_test_id', None,
                     'consumption, and does not have any impact within the '
                     'system.')
 
-# Gangmuk: New Param 0	
-flags.DEFINE_boolean('run_two_model', False, '[ZICO FLAG] run_two_model')	
 # Gangmuk: New Param 1	
 # flags.DEFINE_boolean('use_virtual_devices', False,	
 #                      '[ZICO FLAG] If Ture, set up two virtual devices for one GPU physical '	
