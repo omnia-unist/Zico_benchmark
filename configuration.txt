@@ -1,0 +1,61 @@
+// bfcallocator
+PrintBFC=1
+PrintBFCStep=25
+PrintPeriod=1
+AdaptiveAlloc=0
+ActivateGlobalPool=0
+TensorClassification=0
+ReleaseAll=0
+OneBin=1
+DefaultRegionSize=64
+TightenRegion=1
+StartAligningStep=15
+StartAligningStep1=50
+StartAligningStep2=15
+
+OneAllocator=0
+
+// global pool
+BufferRatio=0
+TightFit=1
+
+// executor
+MaxKernel=0
+
+// simulator
+UseColocatedSimulator=0
+
+// coordinator
+NumVirtualGPU=1
+TurnOnCoordinator=0
+CoordinatorPolicy=None
+PrintCoordinator=0
+
+// op kernel
+TensorRecording=0
+RecordOutputTensorOnly=0
+ForceNoInplace=1
+
+// gpu event mgr
+DeferredMegaBytesThreshold=-1
+
+// gpu device
+GpuThreadMode=0
+GpuThreadCount=1
+
+// almost unused
+PrintBFCOverheadStep=35
+
+///////////////////////////////////// completely not used anymore
+GlobalPoolReleaseAR=0
+GpuReleaseAR=0
+
+AllocationInfoRegistrationStep=9999
+BFCPhaseTwoStep=9999
+PollingActiveDelayUsecs=10
+PrintForwardInput=0
+
+InplaceProfiling=0
+InplaceProfilingStep=9999
+LowLatencyHint=1
+kNumThreads=2
